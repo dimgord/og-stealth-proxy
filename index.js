@@ -71,7 +71,9 @@ const port = process.env.PORT || 3000;
   console.log('[StealthProxy] Launching persistent browser...');
   browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    userDataDir: './.puppeteer_data',
+    protocolTimeout: 60000
   });
 
   app.listen(port, () => {
