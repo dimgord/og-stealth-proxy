@@ -2,11 +2,9 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import express from 'express';
-import Redis from 'ioredis';
 
 puppeteer.use(StealthPlugin());
 
-const redis = new Redis();
 const app = express();
 
 app.use((_, res, next) => {
@@ -19,6 +17,24 @@ app.get('/', (_, res) => {
   res.send('👋 Stealth Puppeteer OG Proxy is running!');
 });
 
+let browser;
+
+async function getBrowser() {
+  if (!browser) {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        // '--proxy-server=http://your.proxy.ip:port', // Optional proxy
+      ],
+      // executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // For macOS local testing
+    });
+    console.log('[StealthProxy] Browser launched once');
+  }
+  return browser;
+}
+
 app.get('/og-proxy', async (req, res) => {
   const url = req.query.url;
   if (!url || !/^https?:\/\//.test(url)) {
@@ -26,22 +42,8 @@ app.get('/og-proxy', async (req, res) => {
   }
 
   try {
-    const cacheKey = `og:${url}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      console.log(`[StealthProxy] Cache hit for ${url}`);
-      return res.json(JSON.parse(cached));
-    }
-
-    console.log(`[StealthProxy] Launching browser for ${url}...`);
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-      ],
-    });
-
+    console.log(`[StealthProxy] Launching browser for ${url}`);
+    const browser = await getBrowser();
     const page = await browser.newPage();
 
     await page.setUserAgent(
@@ -68,15 +70,11 @@ app.get('/og-proxy', async (req, res) => {
       };
     });
 
-    await browser.close();
+    await page.close();
     console.log(`[StealthProxy] Metadata extracted for ${url}`);
-
-    await redis.set(cacheKey, JSON.stringify(metadata), 'EX', 3600);
-    console.log(`[StealthProxy] Cached result for ${url}`);
-
     res.json(metadata);
   } catch (err) {
-    console.error('[StealthProxy] Error:', err);
+    console.error('[StealthProxy] Error:', err.message);
     res.status(500).json({ error: 'Puppeteer error', message: err.message });
   }
 });
@@ -85,4 +83,7 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`[StealthProxy] Listening on port ${port}`);
 });
+
+process.on('exit', () => browser?.close());
+process.on('SIGINT', () => process.exit());
 
