@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Message Logger",
+  "version": "2.0",
+  "description": "Logs all messages from pages to background console",
+  "permissions": ["scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}
+
