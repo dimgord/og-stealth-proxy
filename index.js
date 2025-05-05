@@ -9,11 +9,13 @@ puppeteer.use(StealthPlugin());
 const app = express();
 const redis = new Redis();
 
-app.use((_, res, next) => {
+/* 
+  app.use((_, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
   next();
 });
+*/
 
 let browser;
 
