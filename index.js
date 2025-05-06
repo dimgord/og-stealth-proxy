@@ -10,6 +10,8 @@ const redis = new Redis();
 const app = express();
 
 let browser;
+let consecutiveFailures = 0;
+const MAX_FAILURES = 5;
 
 /*
 app.use((_, res, next) => {
@@ -40,13 +42,31 @@ app.get('/og-proxy', async (req, res) => {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
+try {
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  consecutiveFailures = 0; // reset on success
+} catch (err) {
+  console.error('[StealthProxy] Error during page.goto:', err.message);
+  consecutiveFailures++;
+
+  if (
+    err.message.includes('Navigation timeout') ||
+    err.message.includes('Protocol error')
+  ) {
+    if (consecutiveFailures >= MAX_FAILURES) {
+      console.error('[StealthProxy] Too many consecutive failures — exiting...');
+      process.exit(1); // triggers systemd restart
+    }
+  } else {
+    // для інших типів помилок — можеш просто логнути або теж завершити
+    console.warn('[StealthProxy] Unknown error, not counting toward restart');
+  }
+}
     const metadata = await page.evaluate(() => {
       const getMeta = (prop) =>
         document.querySelector(`meta[property='og:${prop}']`)?.content ||
         document.querySelector(`meta[name='og:${prop}']`)?.content || '';
-
       return {
         title: getMeta('title') || document.title,
         description: getMeta('description'),
@@ -56,9 +76,16 @@ app.get('/og-proxy', async (req, res) => {
     });
 
     await page.close();
-
-    await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60); // 1h TTL
-    console.log('[StealthProxy] Cached result for', url);
+    const md = JSON.stringify(metadata);
+    const image = metadata.image;
+    console.log('[StealthProxy] metadata: ', md);
+    console.log('[StealthProxy] image: ', image);
+    if (image && image.trim() !== "") {
+      await redis.set(url, JSON.stringify(metadata), 'EX', 60*60*10); // 10 hours TTL
+      console.log("[StealthProxy] Cached result for", url);
+    } else {
+      console.log("[StealthProxy] Not cached due to empty image");
+    }
     res.json(metadata);
   } catch (err) {
     console.error('[StealthProxy] Error:', err.message);
@@ -71,8 +98,18 @@ const port = process.env.PORT || 3000;
   console.log('[StealthProxy] Launching persistent browser...');
   browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    userDataDir: './.puppeteer_data',
+    executablePath: '/usr/bin/google-chrome-stable',
+    userDataDir: '/home/dimgord/.puppeteer_data',
+    args: [
+        '--headless',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--single-process',
+        '--disable-crash-reporter',
+        '--no-zygote'
+    ],
     protocolTimeout: 60000
   });
 
@@ -83,4 +120,6 @@ const port = process.env.PORT || 3000;
 
 process.on('exit', () => browser?.close());
 process.on('SIGINT', () => process.exit());
-
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
