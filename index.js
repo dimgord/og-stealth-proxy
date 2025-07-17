@@ -121,11 +121,15 @@ async function launchBrowser() {
 // Запуск браузера з перезапуском щогодини
 (async () => {
   await launchBrowser();
-  setInterval(async () => {
-    console.log('[StealthProxy] Scheduled browser restart...');
+setInterval(async () => {
+  try {
+    console.log(`[StealthProxy] Scheduled browser restart at ${new Date().toISOString()}`);
     await browser.close();
     await launchBrowser();
-  }, 60 * 60 * 1000); // 1 година
+  } catch (err) {
+    console.error('[StealthProxy] Error during scheduled restart:', err);
+  }
+}, 60 * 60 * 1000); // 1 година
 })();
 
 const port = process.env.PORT || 3000;
@@ -136,7 +140,7 @@ app.listen(port, () => {
 process.on('exit', () => browser?.close());
 process.on('SIGINT', () => process.exit());
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
+  console.error(`Uncaught Exception at ${new Date().toISOString()}:`, err);
   process.exit(1);
 });
 
