@@ -96,6 +96,29 @@ app.get('/og-proxy', async (req, res) => {
   });
 });
 
+app.get('/resolve', async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: 'Missing url' });
+
+    // HEAD інколи ріже редіректи на FB, тож беремо GET з redirect: 'follow'
+    const resp = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      headers: {
+        // Трошки “людський” UA, щоб FB не шив апі-бот
+        'User-Agent': 'Mozilla/5.0 (compatible; VriendBot/1.0; +https://dimgord.cc)'
+      }
+    });
+
+    // resp.url — фінальна адреса після всіх редіректів
+    return res.json({ finalUrl: resp.url });
+  } catch (e) {
+    console.error('resolve error', e);
+    return res.status(500).json({ error: 'Resolve failed' });
+  }
+});
+
 const browserLaunchOpts = {
   headless: true,
   executablePath: '/usr/bin/google-chrome-stable',
