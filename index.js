@@ -487,10 +487,6 @@ app.get('/resolve', async (req, res) => {
             r = await fetchHtml(bURL.toString(), 9000);
             canon = pickCanonicalFromHtml(r.html, r.url) || canon;
           }
-          // спроба 5: finally try to proxy it....
-          if (canon && canon !== candidate) {
-
-          }
           if (canon && canon !== candidate) {
             const finalUrl = normalizeUrl(canon);
             console.info('[StealthProxy][resolve] html-canonical →', finalUrl);
