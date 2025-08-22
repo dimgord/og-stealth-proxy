@@ -44,7 +44,7 @@ app.get('/og-proxy', async (req, res) => {
       });
 
       try {
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
         consecutiveFailures = 0;
       } catch (err) {
         console.error('[StealthProxy] Error during page.goto:', err.message);
