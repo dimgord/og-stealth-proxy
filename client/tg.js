@@ -5,28 +5,33 @@ $(function () {
 
   posts.each(function () {
     const contentBlock = $(this);
-    const matches = contentBlock.text().matchAll(/https?:\/\/t\.me\/([a-zA-Z0-9_]+)\/(\d+)/g);
+    // Знаходимо всі лінки t.me у цьому postbody
+    const links = contentBlock.find('a[href*="t.me/"]');
 
-    for (const match of matches) {
+    links.each(function () {
+      const $link = $(this);
+      const href = $link.attr('href');
+      const match = href.match(/https?:\/\/t\.me\/([a-zA-Z0-9_]+)\/(\d+)/);
+
+      if (!match) return;
+
       const channel = match[1];
       const messageId = match[2];
       const widgetId = "telegram-iframe-" + channel + "-" + messageId;
       const iframeURL = "https://t.me/" + channel + "/" + messageId + "?embed=1";
 
-      console.log("[TelegramEmbed] Trying iframe for " + channel + "/" + messageId);
-
       // щоб не дублювати, перевіряємо
-      if (contentBlock.find("#" + widgetId).length > 0) continue;
+      if (contentBlock.find("#" + widgetId).length > 0) return;
 
       const iframeHTML = `
         <iframe id="${widgetId}" src="${iframeURL}"
-          width="100%" height="600" frameborder="0" scrolling="yes"
-          style="border: 1px solid #ccc; border-radius: 6px; margin-top: 10px; max-width: 700px; width: 100%; display: block; margin-left: auto; margin-right: auto;">
+          width="90%" height="500" frameborder="0" scrolling="yes"
+          style="border: 1px solid #ccc; border-radius: 6px; margin-top: 10px; max-width: 500px; width: 90%; display: block; margin-left: auto; margin-right: auto;">
         </iframe>`;
 
-      contentBlock.append(iframeHTML);
+      // Додаємо iframe одразу після лінка
+      $link.after(iframeHTML);
 
-      // fallback або адаптивне регулювання
       setTimeout(function () {
         const iframe = document.getElementById(widgetId);
         const iframeVisible = !!iframe;
@@ -39,18 +44,18 @@ $(function () {
               <a href="https://t.me/${channel}/${messageId}" target="_blank" style="font-weight:bold; color:#0088cc; text-decoration:none;">
                 View Telegram Post</a>
             </div>`;
-          contentBlock.append(fallback);
+          $link.after(fallback);
         } else {
           console.log("[TelegramEmbed] iframe embed visible for " + channel + "/" + messageId);
           const height = iframe.clientHeight;
           console.log("[TelegramEmbed] Detected iframe height:", height);
 
           if (height < 600) {
-            iframe.style.height = "600px";
-            console.log("[TelegramEmbed] Iframe too short — applying fallback height = 600px");
+            iframe.style.height = "400px";
+            console.log("[TelegramEmbed] Iframe too short — applying fallback height = 400px");
           }
         }
       }, 2000);
-    }
+    });
   });
 });
