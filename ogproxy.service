@@ -16,7 +16,7 @@ RestartSec=2s
 # Включи чітке логування:
 Environment=NODE_ENV=production
 
-ExecStart=/usr/bin/node /path/to/index.js
+ExecStart=/usr/bin/node /home/dimgord/projs/og-stealth-proxy/index.js
 # опційно: щоб прибрати хроми, якщо раптом зависли
 ExecStopPost=/usr/bin/pkill -9 -f "chrome.*StealthProxy" || true
 
