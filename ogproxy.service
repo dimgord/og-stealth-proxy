@@ -1,0 +1,25 @@
+[Unit]
+Description=OG Proxy
+After=network.target
+
+[Service]
+# Якщо у тебе Type не заданий — це Type=simple
+# Швидке коректне завершення:
+KillSignal=SIGTERM
+TimeoutStopSec=6s
+SendSIGKILL=yes
+KillMode=mixed           # термінуємо головний процес, а дітей — силою після таймауту
+# (альтернатива) KillMode=control-group — вб’є одразу всю cgroup після таймауту
+
+Restart=on-failure
+RestartSec=2s
+# Включи чітке логування:
+Environment=NODE_ENV=production
+
+ExecStart=/usr/bin/node /path/to/index.js
+# опційно: щоб прибрати хроми, якщо раптом зависли
+ExecStopPost=/usr/bin/pkill -9 -f "chrome.*StealthProxy" || true
+
+[Install]
+WantedBy=multi-user.target
+
