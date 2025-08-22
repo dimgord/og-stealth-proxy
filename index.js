@@ -36,6 +36,24 @@ function pickCanonicalFromHtml(html, baseUrl) {
   // <link rel="canonical" href="...">
   m = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i);
   if (m && m[1]) return m[1];
+  // <meta http-equiv="refresh" content="0; url=...">
+  m = html.match(/<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"'>\s]+)[^"']*["']/i);
+  if (m && m[1]) return new URL(m[1], baseUrl).toString();
+  // JSON-блоки з "canonical":"https://www.facebook.com/..."
+  m = html.match(/"canonical"\s*:\s*"([^"]+facebook\.com[^"]+)"/i);
+  if (m && m[1]) return m[1];
+  // Скриптові редіректи: window.location = '...'; location.replace("...")
+  m = html.match(/location\.(?:href|replace)\((["'])(https?:\/\/[^"']+facebook\.com[^"']+)\1\)/i);
+  if (m && m[2]) return m[2];
+  // Побутовий евристичний пошук «канонічних» цілей усередині HTML
+  const rx = /(https?:\/\/(?:www|m|mbasic)\.facebook\.com\/(?:watch\/?\?v=\d+|videos\/\d+|reel\/[A-Za-z0-9]+|permalink\.php\?[^"'<\s]+|story\.php\?[^"'<\s]+|photo\/\?fbid=\d+))/i;
+  m = html.match(rx);
+  if (m && m[1]) return m[1];
+  // l.facebook.com/l.php?u=...
+  m = html.match(/https?:\/\/l\.facebook\.com\/l\.php\?[^"'<>]*\bu=([^&"'<>]+)/i);
+  if (m && m[1]) {
+    try { return decodeURIComponent(m[1]); } catch {}
+  }
   return null;
 }
 
@@ -284,25 +302,30 @@ app.get('/resolve', async (req, res) => {
           const finalUrl = normalizeUrl(out.finalUrl);
           return res.json({ finalUrl, hops: out.hops, method: 'manual' });
         }
-        // 3c) [FB share] немає 3xx → тягнемо HTML і беремо canonical/og:url
+        // 3c) [FB share] немає 3xx → тягнемо HTML і шукаємо canonical/og/url/refresh/евристики
         if (isFbShare) {
           console.info('[StealthProxy][resolve] share/*: try HTML canonical');
-          // спершу www
-          let { url: u1, html } = await fetchHtml(candidate, 10000);
-          let canon = pickCanonicalFromHtml(html, u1);
+          let canon = null;
+          // спроба 1: www + _fb_noscript=1
+          const uNoScript = new URL(candidate); uNoScript.searchParams.set('_fb_noscript', '1');
+          let r = await fetchHtml(uNoScript.toString(), 10000);
+          canon = pickCanonicalFromHtml(r.html, r.url);
+          // спроба 2: www без noscript
           if (!canon || canon === candidate) {
-            // потім m.facebook.com
-            try {
-              const mURL = new URL(candidate); mURL.hostname = 'm.facebook.com';
-              const r2 = await fetchHtml(mURL.toString(), 10000);
-              canon = pickCanonicalFromHtml(r2.html, r2.url) || canon;
-              if (!canon || canon === candidate) {
-                // і mbasic.facebook.com як останній шанс
-                const bURL = new URL(candidate); bURL.hostname = 'mbasic.facebook.com';
-                const r3 = await fetchHtml(bURL.toString(), 10000);
-                canon = pickCanonicalFromHtml(r3.html, r3.url) || canon;
-              }
-            } catch {}
+            r = await fetchHtml(candidate, 9000);
+            canon = pickCanonicalFromHtml(r.html, r.url) || canon;
+          }
+          // спроба 3: m.facebook.com
+          if (!canon || canon === candidate) {
+            const mURL = new URL(candidate); mURL.hostname = 'm.facebook.com';
+            r = await fetchHtml(mURL.toString(), 9000);
+            canon = pickCanonicalFromHtml(r.html, r.url) || canon;
+          }
+          // спроба 4: mbasic.facebook.com
+          if (!canon || canon === candidate) {
+            const bURL = new URL(candidate); bURL.hostname = 'mbasic.facebook.com';
+            r = await fetchHtml(bURL.toString(), 9000);
+            canon = pickCanonicalFromHtml(r.html, r.url) || canon;
           }
           if (canon && canon !== candidate) {
             const finalUrl = normalizeUrl(canon);
