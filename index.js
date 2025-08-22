@@ -2,12 +2,15 @@
 
 'use strict';
 
-const express = require('express');
-const http = require('http');
-const crypto = require('crypto');
-const { Queue, Worker, QueueEvents } = require('bullmq');
-const IORedis = require('ioredis');
-const puppeteer = require('puppeteer');
+import express from 'express';
+import http from 'http';
+import crypto from 'crypto';
+import { Queue, Worker, QueueEvents } from 'bullmq';
+import IORedis from 'ioredis';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+puppeteer.use(StealthPlugin());
 
 const app = express();
 
