@@ -337,7 +337,7 @@ async function getOgCanonical_bad(rawUrl, { useBrowser = true, log = console } =
   return og2;
 }
 
-async function getOgCanonical(url, { useBrowser = true, log = console } = {}) {
+async function getOgCanonical(url, res, { useBrowser = true, log = console } = {}) {
   queue.add(async () => {
     let page;
     try {
@@ -416,7 +416,7 @@ app.get('/og-proxy', async (req, res) => {
     return res.json(JSON.parse(cached));
   }
 
-  const og = await getOgCanonical(url, { useBrowser: true, log: console });
+  const og = await getOgCanonical(url, res, { useBrowser: true, log: console });
   return res.json(og);
 
 });
@@ -463,7 +463,7 @@ app.get('/resolve', async (req, res) => {
         if (isFbShare) {
           // 3d) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
             console.info('[StealthProxy][resolve] fallback to OG canonical…');
-            const og = await getOgCanonical(candidate, { useBrowser: true, log: console });
+            const og = await getOgCanonical(candidate, res, { useBrowser: true, log: console });
             if (og && og.url) {
               const finalUrl = normalizeUrl(og.url);
               if (finalUrl && finalUrl !== candidate) {
