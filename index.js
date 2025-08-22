@@ -8,6 +8,23 @@ import PQueue from 'p-queue';
 const RESOLVE_UA = 'StealthProxy/1.0 (+https://www.dimgord.cc)';
 const RESOLVE_LANG = 'en-US,en;q=0.9,uk-UA;q=0.8';
 
+async function autoFollow(url, timeoutMs = 10000) {
+  const ctrl = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
+  const res = await fetch(url, {
+    method: 'GET',             // FB не любить HEAD для share/*
+    redirect: 'follow',
+    headers: {
+      'user-agent': RESOLVE_UA,
+      'accept-language': RESOLVE_LANG,
+      'accept': 'text/html,*/*;q=0.8',
+      'upgrade-insecure-requests': '1',
+      'referer': 'https://www.facebook.com/',
+    },
+    signal: ctrl,
+  });
+  return res.url || url;
+}
+
 function coerceUrl(raw) {
   // 1) спробувати як є
   const tries = [raw];
@@ -213,18 +230,28 @@ app.get('/resolve', async (req, res) => {
 
     // 2) нормалізація (unwrap + очистка трекінгу)
     let candidate = normalizeUrl(u.toString());
-    let host = null;
-    try { host = new URL(candidate).hostname; } catch {}
+    let host = null, path = '';
+    try { const tmp = new URL(candidate); host = tmp.hostname; path = tmp.pathname; } catch {}
+
 
     // 3) список шортенерів/редіректорів, для яких йдемо по мережі
-    const needsNetwork = /^(?:fb\.me|l\.facebook\.com|l\.instagram\.com|t\.co|bit\.ly|tinyurl\.com|goo\.gl|ow\.ly)$/i;
-    if (host && needsNetwork.test(host)) {
+    const needsNetworkHost = /^(?:fb\.me|l\.facebook\.com|l\.instagram\.com|t\.co|bit\.ly|tinyurl\.com|goo\.gl|ow\.ly)$/i;
+    const isFbShare = host && /(?:^|\.)facebook\.com$/i.test(host) && /^\/share\/[a-z]\/[A-Za-z0-9]+\/?$/i.test(path);
+    if (host && (needsNetworkHost.test(host) || isFbShare)) {
       console.info('[StealthProxy][resolve] network-follow for', candidate);
       try {
+        // 3a) швидко: дати fetch'у самому пройти редіректи і взяти res.url
+        const auto = await autoFollow(candidate, 10000);
+        if (auto && auto !== candidate) {
+          const finalUrl = normalizeUrl(auto);
+          console.info('[StealthProxy][resolve] auto-follow →', finalUrl);
+          return res.json({ finalUrl, method: 'auto' });
+        }
+        // 3b) якщо не зрушило — manual hops (деякі ланцюжки віддають 30x лише на HEAD/GET різних кроках)
         const out = await followRedirectsManual(candidate, { maxHops: 10, timeoutMs: 10000, log: console });
         // фінальна легка нормалізація — на випадок, якщо останній крок теж мав зайві параметри
-        out.finalUrl = normalizeUrl(out.finalUrl);
-        return res.json({ finalUrl: out.finalUrl, hops: out.hops });
+        const finalUrl = normalizeUrl(out.finalUrl);
+        return res.json({ finalUrl, hops: out.hops, method: 'manual' });
       } catch (e) {
         console.warn('[StealthProxy][resolve] network-follow failed:', e?.message || e);
         // віддаємо хоча б нормалізований варіант
