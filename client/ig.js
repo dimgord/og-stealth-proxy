@@ -1,9 +1,10 @@
-// ig.js — Instagram embeder (reels / p / tv) з фолбеком на OG-проксі
+// ig.js — повний Instagram embeder з fallback на OG-проксі
 // Залежності: jQuery 1.9+
 //
-// Мінімальна інтеграція:
-//   <script src="/path/to/jquery.js"></script>
-//   <script src="/path/to/ig.js"></script>
+// Підключення в шаблоні (приклад):
+//   <script>window.OG_PROXY_BASE = 'https://www.dimgord.cc';</script>
+//   <script src="/static/js/jquery.min.js"></script>
+//   <script src="/static/js/ig.js"></script>
 
 (function () {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -16,12 +17,12 @@
   const OG_API = PROXY_BASE + '/og-proxy?url=';
 
   // --- helpers ---
-  const isIg = (u) => /https?:\/\/(www\.)?instagram\.com\//i.test(u);
+  const isIg = (u) => /https?:\/\/(?:www\.)?instagram\.com\//i.test(u);
 
   const stripIgQuery = (u) => {
     try {
       const url = new URL(u);
-      // l.instagram.com/?u=... → дістаємо оригінал
+      // l.instagram.com/?u=... → дістаємо оригінал і рекурсивно чистимо
       if (/^l\.instagram\.com$/i.test(url.hostname)) {
         const orig = url.searchParams.get('u');
         if (orig) return stripIgQuery(orig);
@@ -39,7 +40,7 @@
 
   const isIgPost = (u) => /https?:\/\/(?:www\.)?instagram\.com\/p\/([A-Za-z0-9_-]+)/i.exec(u);
   const isIgReel = (u) => /https?:\/\/(?:www\.)?instagram\.com\/reel\/([A-Za-z0-9_-]+)/i.exec(u);
-  const isIgTv   = (u)   => /https?:\/\/(?:www\.)?instagram\.com\/tv\/([A-Za-z0-9_-]+)/i.exec(u);
+  const isIgTv   = (u) => /https?:\/\/(?:www\.)?instagram\.com\/tv\/([A-Za-z0-9_-]+)/i.exec(u);
 
   async function fetchJSON(url) {
     const r = await fetch(url);
@@ -150,10 +151,10 @@
   }
 
   function scanRoot($root) {
-    // ті ж самі пост-блоки, що й у fb.js (підлаштовуємось під твою розмітку)
+    // під твою розмітку (аналог fb.js)
     const $posts = $root
-      ? $root.find('div.postbody:contains("instagram.com/")')
-      : $('div.postbody:contains("instagram.com/")');
+      ? $root.find('div.postbody:contains("instagram.com/"), div.postbody:contains("l.instagram.com/")')
+      : $('div.postbody:contains("instagram.com/"), div.postbody:contains("l.instagram.com/")');
 
     $posts.each(function () {
       const $contentBlock = $(this);
@@ -164,7 +165,7 @@
     });
   }
 
-  // --- запуск після готовності DOM ---
+  // --- запуск: DOM готовий
   if (window.jQuery) {
     $(function () {
       console.log('[InstagramEmbed] scanning for instagram.com links…');
@@ -181,7 +182,7 @@
     });
   }
 
-  // Експорт локального API (за бажанням)
+  // опційно експорт для дебагу вручну
   window._IG_EMBED = { scanRoot, ensureIgSdk };
 
 })();

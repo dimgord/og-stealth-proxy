@@ -4,6 +4,48 @@ import express from 'express';
 import Redis from 'ioredis';
 import PQueue from 'p-queue';
 
+const UA = 'ogproxy/1.0 (+https://www.dimgord.cc)'; // щоб нас не банили за пустий UA
+
+function isPrivateHost(host) {
+  // брутальний, але ефективний захист від SSRF: блокуємо локальні та RFC1918
+  return /^(localhost|127\.0\.0\.1|::1)$/.test(host) ||
+         /^10\./.test(host) || /^192\.168\./.test(host) ||
+         /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+         /^169\.254\./.test(host);
+}
+
+function normalizeUrl(raw) {
+  try {
+    const url = new URL(raw);
+    // l.instagram.com → дістаємо справжній таргет із ?u=
+    if (/^l\.instagram\.com$/i.test(url.hostname)) {
+      const u = url.searchParams.get('u');
+      if (u) return normalizeUrl(u);
+    }
+    // чистимо сміття
+    url.searchParams.delete('igshid');
+    Array.from(url.searchParams.keys()).forEach((k) => {
+      if (/^utm_/i.test(k)) url.searchParams.delete(k);
+    });
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
+async function followRedirects(inUrl) {
+  // частина сервісів (fb.me/bit.ly/t.co) не люблять HEAD — беремо GET, але з таймаутом
+  const ctrl = AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined;
+  const res = await fetch(inUrl, {
+    method: 'GET',
+    redirect: 'follow',
+    headers: { 'user-agent': UA },
+    signal: ctrl
+  });
+  // у fetch final URL сидить у res.url
+  return res.url || inUrl;
+}
+
 puppeteer.use(StealthPlugin());
 
 const redis = new Redis();
@@ -101,19 +143,30 @@ app.get('/resolve', async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).json({ error: 'Missing url' });
 
-    // HEAD інколи ріже редіректи на FB, тож беремо GET з redirect: 'follow'
-    const resp = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      headers: {
-        // Трошки “людський” UA, щоб FB не шив апі-бот
-        'User-Agent': 'Mozilla/5.0 (compatible; VriendBot/1.0; +https://dimgord.cc)'
-      }
-    });
+    // 1) базова валідація
+    let urlObj;
+    try { urlObj = new URL(inUrl); } catch { return res.status(400).json({ error: 'bad url' }); }
+    if (!/^https?:$/.test(urlObj.protocol)) return res.status(400).json({ error: 'unsupported scheme' });
+    if (isPrivateHost(urlObj.hostname)) return res.status(400).json({ error: 'private host blocked' });
 
-    // resp.url — фінальна адреса після всіх редіректів
-    return res.json({ finalUrl: resp.url });
-  } catch (e) {
+    // 2) нормалізуємо одразу (чистимо igshid/utm, розкручуємо l.instagram.com/?u=...)
+    let candidate = normalizeUrl(inUrl);
+
+    // 3) якщо це відомі шортенери — йдемо в мережу та даємо fetch'у пройти 30x
+    const needNetwork = /^(?:fb\.me|t\.co|bit\.ly|tinyurl\.com|l\.facebook\.com)$/i.test(urlObj.hostname);
+    if (needNetwork) {
+      try {
+        const networkFinal = await followRedirects(candidate);
+        return res.json({ finalUrl: normalizeUrl(networkFinal) });
+      } catch (e) {
+        // якщо щось пішло не так — хоч нормалізований варіант повернемо
+        return res.json({ finalUrl: candidate, warning: 'network-resolve-failed' });
+      }
+    }
+
+    // 4) інакше достатньо нормалізації (для «звичайних» прямих посилань)
+    return res.json({ finalUrl: candidate });
+} catch (e) {
     console.error('resolve error', e);
     return res.status(500).json({ error: 'Resolve failed' });
   }
