@@ -4,10 +4,11 @@ import express from 'express';
 import Redis from 'ioredis';
 import PQueue from 'p-queue';
 
-const UA = 'ogproxy/1.0 (+https://www.dimgord.cc)'; // щоб нас не банили за пустий UA
+// ---------- resolve helpers ----------
+const RESOLVE_UA = 'StealthProxy/1.0 (+https://www.dimgord.cc)';
+const RESOLVE_LANG = 'en-US,en;q=0.9,uk-UA;q=0.8';
 
 function isPrivateHost(host) {
-  // брутальний, але ефективний захист від SSRF: блокуємо локальні та RFC1918
   return /^(localhost|127\.0\.0\.1|::1)$/.test(host) ||
          /^10\./.test(host) || /^192\.168\./.test(host) ||
          /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
@@ -17,35 +18,75 @@ function isPrivateHost(host) {
 function normalizeUrl(raw) {
   try {
     const url = new URL(raw);
-    // l.instagram.com → дістаємо справжній таргет із ?u=
-    if (/^l\.instagram\.com$/i.test(url.hostname)) {
+    // unwrap l.instagram.com / l.facebook.com ?u=...
+    if (/^l\.(?:facebook|instagram)\.com$/i.test(url.hostname)) {
       const u = url.searchParams.get('u');
       if (u) return normalizeUrl(u);
     }
-    // чистимо сміття
+    // clean noise
     url.searchParams.delete('igshid');
-    Array.from(url.searchParams.keys()).forEach((k) => {
+    for (const k of Array.from(url.searchParams.keys())) {
       if (/^utm_/i.test(k)) url.searchParams.delete(k);
-    });
+    }
     return url.toString();
   } catch {
     return raw;
   }
 }
 
-async function followRedirects(inUrl) {
-  // частина сервісів (fb.me/bit.ly/t.co) не люблять HEAD — беремо GET, але з таймаутом
-  const ctrl = AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined;
-  const res = await fetch(inUrl, {
-    method: 'GET',
-    redirect: 'follow',
-    headers: { 'user-agent': UA },
-    signal: ctrl
-  });
-  // у fetch final URL сидить у res.url
-  return res.url || inUrl;
+async function headOrGet(url, redirectMode = 'manual', method = 'HEAD', signal) {
+  try {
+    const r = await fetch(url, {
+      method,
+      redirect: redirectMode,
+      headers: {
+        'user-agent': RESOLVE_UA,
+        'accept-language': RESOLVE_LANG,
+        'accept': '*/*',
+      },
+      signal,
+    });
+    return r;
+  } catch (e) {
+    // деякі сервіси не люблять HEAD або кидають під час CONNECT — спробуємо GET
+    if (method === 'HEAD') {
+      return fetch(url, {
+        method: 'GET',
+        redirect: redirectMode,
+        headers: {
+          'user-agent': RESOLVE_UA,
+          'accept-language': RESOLVE_LANG,
+          'accept': 'text/html,*/*;q=0.8',
+        },
+        signal,
+      });
+    }
+    throw e;
+  }
 }
 
+async function followRedirectsManual(startUrl, { maxHops = 10, timeoutMs = 10000, log = console } = {}) {
+  const hops = [startUrl];
+  let current = startUrl;
+  for (let i = 0; i < maxHops; i++) {
+    const ctrl = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
+    log.info?.('[StealthProxy][resolve] hop', i, '→', current);
+    const res = await headOrGet(current, 'manual', 'HEAD', ctrl);
+    const loc = res.headers.get('location');
+    // якщо немає редіректу — фініш
+    if (!loc || res.status < 300 || res.status >= 400) {
+      // буває, що сервер одразу віддав 200 (без редіректів)
+      const finalUrl = res.url || current;
+      return { finalUrl, hops };
+    }
+    // resolve відносних шляхів
+    const nextUrl = new URL(loc, current).toString();
+    hops.push(nextUrl);
+    current = nextUrl;
+  }
+  return { finalUrl: current, hops, warning: 'max-hops' };
+}
+ 
 puppeteer.use(StealthPlugin());
 
 const redis = new Redis();
@@ -140,31 +181,38 @@ app.get('/og-proxy', async (req, res) => {
 
 app.get('/resolve', async (req, res) => {
   try {
-    const { url } = req.query;
-    if (!url) return res.status(400).json({ error: 'Missing url' });
+    const { inUrl } = req.query;
+    if (!inUrl) return res.status(400).json({ error: 'Missing url' });
 
     // 1) базова валідація
-    let urlObj;
-    try { urlObj = new URL(inUrl); } catch { return res.status(400).json({ error: 'bad url' }); }
-    if (!/^https?:$/.test(urlObj.protocol)) return res.status(400).json({ error: 'unsupported scheme' });
-    if (isPrivateHost(urlObj.hostname)) return res.status(400).json({ error: 'private host blocked' });
+    let u;
+    try { u = new URL(inUrl); } catch { return res.status(400).json({ error: 'bad url' }); }
+    if (!/^https?:$/.test(u.protocol)) return res.status(400).json({ error: 'unsupported scheme' });
+    if (isPrivateHost(u.hostname)) return res.status(400).json({ error: 'private host blocked' });
 
-    // 2) нормалізуємо одразу (чистимо igshid/utm, розкручуємо l.instagram.com/?u=...)
+    // 2) нормалізація (unwrap + очистка трекінгу)
     let candidate = normalizeUrl(inUrl);
+    let host = null;
+    try { host = new URL(candidate).hostname; } catch {}
 
-    // 3) якщо це відомі шортенери — йдемо в мережу та даємо fetch'у пройти 30x
-    const needNetwork = /^(?:fb\.me|t\.co|bit\.ly|tinyurl\.com|l\.facebook\.com)$/i.test(urlObj.hostname);
-    if (needNetwork) {
+    // 3) список шортенерів/редіректорів, для яких йдемо по мережі
+    const needsNetwork = /^(?:fb\.me|l\.facebook\.com|l\.instagram\.com|t\.co|bit\.ly|tinyurl\.com|goo\.gl|ow\.ly)$/i;
+    if (host && needsNetwork.test(host)) {
+      console.info('[StealthProxy][resolve] network-follow for', candidate);
       try {
-        const networkFinal = await followRedirects(candidate);
-        return res.json({ finalUrl: normalizeUrl(networkFinal) });
+        const out = await followRedirectsManual(candidate, { maxHops: 10, timeoutMs: 10000, log: console });
+        // фінальна легка нормалізація — на випадок, якщо останній крок теж мав зайві параметри
+        out.finalUrl = normalizeUrl(out.finalUrl);
+        return res.json({ finalUrl: out.finalUrl, hops: out.hops });
       } catch (e) {
-        // якщо щось пішло не так — хоч нормалізований варіант повернемо
+        console.warn('[StealthProxy][resolve] network-follow failed:', e?.message || e);
+        // віддаємо хоча б нормалізований варіант
         return res.json({ finalUrl: candidate, warning: 'network-resolve-failed' });
       }
     }
 
-    // 4) інакше достатньо нормалізації (для «звичайних» прямих посилань)
+    // 4) для «звичайних» лінків достатньо нормалізації
+    console.info('[StealthProxy][resolve] normalized only →', candidate);
     return res.json({ finalUrl: candidate });
 } catch (e) {
     console.error('resolve error', e);
