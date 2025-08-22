@@ -8,6 +8,28 @@ import PQueue from 'p-queue';
 const RESOLVE_UA = 'StealthProxy/1.0 (+https://www.dimgord.cc)';
 const RESOLVE_LANG = 'en-US,en;q=0.9,uk-UA;q=0.8';
 
+function coerceUrl(raw) {
+  // 1) спробувати як є
+  const tries = [raw];
+  // 2) один раз розкодувати
+  try { tries.push(decodeURIComponent(raw)); } catch {}
+  // 3) ще раз (деякі фронтенди двічі кодують)
+  try { tries.push(decodeURIComponent(tries[tries.length - 1])); } catch {}
+  for (let cand of tries) {
+    if (!cand) continue;
+    cand = cand.trim();
+    // якщо без схеми, але схоже на домен — домалюємо https://
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(cand) &&
+        /^(?:www\.|facebook\.com\/|l\.facebook\.com\/|m\.facebook\.com\/|mbasic\.facebook\.com\/|instagram\.com\/|l\.instagram\.com\/)/i.test(cand)) {
+      cand = 'https://' + cand.replace(/^\/+/, '');
+    }
+    try {
+      return new URL(cand); // повертаємо вже URL-об'єкт
+    } catch {}
+  }
+  throw new Error('unparsable');
+}
+
 function isPrivateHost(host) {
   return /^(localhost|127\.0\.0\.1|::1)$/.test(host) ||
          /^10\./.test(host) || /^192\.168\./.test(host) ||
@@ -181,17 +203,16 @@ app.get('/og-proxy', async (req, res) => {
 
 app.get('/resolve', async (req, res) => {
   try {
-    const { inUrl } = req.query;
-    if (!inUrl) return res.status(400).json({ error: 'Missing url' });
-
-    // 1) базова валідація
+    const inUrl = req.query.url;
+    if (!inUrl) return res.status(400).json({ error: 'no url' });
+    // 1) толерантний парсинг + авто-додавання https://
     let u;
-    try { u = new URL(inUrl); } catch { return res.status(400).json({ error: 'bad url' }); }
+    try { u = coerceUrl(inUrl); } catch { return res.status(400).json({ error: 'bad url' }); }
     if (!/^https?:$/.test(u.protocol)) return res.status(400).json({ error: 'unsupported scheme' });
     if (isPrivateHost(u.hostname)) return res.status(400).json({ error: 'private host blocked' });
 
     // 2) нормалізація (unwrap + очистка трекінгу)
-    let candidate = normalizeUrl(inUrl);
+    let candidate = normalizeUrl(u.toString());
     let host = null;
     try { host = new URL(candidate).hostname; } catch {}
 

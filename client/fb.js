@@ -24,6 +24,8 @@ $(function () {
   const isStory = (u) => /https?:\/\/www\.facebook\.com\/story\.php\?([^#]+)/i.exec(u);
   const isPermalink = (u) => /https?:\/\/www\.facebook\.com\/permalink\.php\?([^#]+)/i.exec(u);
   const isEvent = (u) => /https?:\/\/www\.facebook\.com\/events\/(\d+)/i.exec(u);
+  const isShare = (u) => /https?:\/\/www\.facebook\.com\/share\/[a-z]\/([A-Za-z0-9]+)/i.exec(u);
+
 
   async function expandFb(url) {
     try {
@@ -98,8 +100,23 @@ $(function () {
 
         // expand + normalize
         let href = origHref;
+
         if (isFbShort(href)) href = await expandFb(href);
         href = normFb(href);
+
+        // Обробка /share/* → спершу розкручуємо через /resolve, тоді знову normFb
+        const share = isShare(href);
+        if (share) {
+          try {
+            const expanded = await expandFb(href);
+            if (expanded) {
+              href = normFb(expanded);
+              console.log('[FacebookEmbed] share expanded →', href);
+            }
+          } catch (e) {
+            console.warn('[FacebookEmbed] share expand failed', e);
+          }
+        }
 
         let matched = false;
 
