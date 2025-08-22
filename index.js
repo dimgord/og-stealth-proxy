@@ -8,6 +8,37 @@ import PQueue from 'p-queue';
 const RESOLVE_UA = 'StealthProxy/1.0 (+https://www.dimgord.cc)';
 const RESOLVE_LANG = 'en-US,en;q=0.9,uk-UA;q=0.8';
 
+async function fetchHtml(url, timeoutMs = 10000) {
+  const ctrl = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
+  const res = await fetch(url, {
+    method: 'GET',
+    redirect: 'follow',
+    headers: {
+      'user-agent': RESOLVE_UA,
+      'accept-language': RESOLVE_LANG,
+      'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'upgrade-insecure-requests': '1',
+      'referer': 'https://www.facebook.com/',
+    },
+    signal: ctrl,
+  });
+  const ctype = (res.headers.get('content-type') || '').toLowerCase();
+  if (!ctype.includes('text/html')) return { url: res.url || url, html: '' };
+  const html = await res.text();
+  return { url: res.url || url, html };
+}
+
+function pickCanonicalFromHtml(html, baseUrl) {
+  if (!html) return null;
+  // <meta property="og:url" content="...">
+  let m = html.match(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i);
+  if (m && m[1]) return m[1];
+  // <link rel="canonical" href="...">
+  m = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i);
+  if (m && m[1]) return m[1];
+  return null;
+}
+
 async function autoFollow(url, timeoutMs = 10000) {
   const ctrl = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
   const res = await fetch(url, {
@@ -233,7 +264,6 @@ app.get('/resolve', async (req, res) => {
     let host = null, path = '';
     try { const tmp = new URL(candidate); host = tmp.hostname; path = tmp.pathname; } catch {}
 
-
     // 3) список шортенерів/редіректорів, для яких йдемо по мережі
     const needsNetworkHost = /^(?:fb\.me|l\.facebook\.com|l\.instagram\.com|t\.co|bit\.ly|tinyurl\.com|goo\.gl|ow\.ly)$/i;
     const isFbShare = host && /(?:^|\.)facebook\.com$/i.test(host) && /^\/share\/[a-z]\/[A-Za-z0-9]+\/?$/i.test(path);
@@ -248,11 +278,38 @@ app.get('/resolve', async (req, res) => {
           console.info('[StealthProxy][resolve] auto-follow →', finalUrl);
           return res.json({ finalUrl, method: 'auto' });
         }
-        // 3b) якщо не зрушило — manual hops (деякі ланцюжки віддають 30x лише на HEAD/GET різних кроках)
+        // 3b) manual hops
         const out = await followRedirectsManual(candidate, { maxHops: 10, timeoutMs: 10000, log: console });
-        // фінальна легка нормалізація — на випадок, якщо останній крок теж мав зайві параметри
-        const finalUrl = normalizeUrl(out.finalUrl);
-        return res.json({ finalUrl, hops: out.hops, method: 'manual' });
+        if (out.finalUrl && out.finalUrl !== candidate) {
+          const finalUrl = normalizeUrl(out.finalUrl);
+          return res.json({ finalUrl, hops: out.hops, method: 'manual' });
+        }
+        // 3c) [FB share] немає 3xx → тягнемо HTML і беремо canonical/og:url
+        if (isFbShare) {
+          console.info('[StealthProxy][resolve] share/*: try HTML canonical');
+          // спершу www
+          let { url: u1, html } = await fetchHtml(candidate, 10000);
+          let canon = pickCanonicalFromHtml(html, u1);
+          if (!canon || canon === candidate) {
+            // потім m.facebook.com
+            try {
+              const mURL = new URL(candidate); mURL.hostname = 'm.facebook.com';
+              const r2 = await fetchHtml(mURL.toString(), 10000);
+              canon = pickCanonicalFromHtml(r2.html, r2.url) || canon;
+              if (!canon || canon === candidate) {
+                // і mbasic.facebook.com як останній шанс
+                const bURL = new URL(candidate); bURL.hostname = 'mbasic.facebook.com';
+                const r3 = await fetchHtml(bURL.toString(), 10000);
+                canon = pickCanonicalFromHtml(r3.html, r3.url) || canon;
+              }
+            } catch {}
+          }
+          if (canon && canon !== candidate) {
+            const finalUrl = normalizeUrl(canon);
+            console.info('[StealthProxy][resolve] html-canonical →', finalUrl);
+            return res.json({ finalUrl, method: 'html-canonical' });
+          }
+        }
       } catch (e) {
         console.warn('[StealthProxy][resolve] network-follow failed:', e?.message || e);
         // віддаємо хоча б нормалізований варіант
