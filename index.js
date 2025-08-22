@@ -35,9 +35,9 @@ async function fetchHtmlSimple(url, timeoutMs = 10000) {
     },
     signal: ctrl,
   });
-  const ctype = (res.headers.get('content-type') || '').toLowerCase();
+  const ctype = (res?.headers.get('content-type') || '').toLowerCase();
   const html = ctype.includes('text/html') ? await res.text() : '';
-  return { finalUrl: res.url || url, html };
+  return { finalUrl: res?.url || url, html };
 }
 
 // Останній притулок для /resolve на facebook.com/share/*:
