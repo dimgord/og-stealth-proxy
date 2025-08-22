@@ -364,7 +364,10 @@ const resolveWorker = new Worker('resolve-expand', async (job) => {
   const url = job.data.url;
   const cacheKey = `resolv:${h(url)}`;
   const hit = await cacheGetJSON(cacheKey);
-  if (hit) return hit;
+  if (hit) { 
+    console.info('[StealthProxy][resolve-expand] cache hit: ', hit);
+    return hit;
+  }
 
   // tolerant parse
   let u; try { u = coerceUrl(url); } catch { return { finalUrl: url, warning: 'bad-url' }; }
@@ -436,7 +439,8 @@ const resolveWorker = new Worker('resolve-expand', async (job) => {
   }
 
   const out = { finalUrl: candidate, warning: 'nochange' };
-  await cacheSetJSON(cacheKey, out, RESOLVE_CACHE_TTL);
+  // do not cache fall back
+  // await cacheSetJSON(cacheKey, out, RESOLVE_CACHE_TTL);
   return out;
 }, { connection, concurrency: parseInt(process.env.RESOLVE_CONCURRENCY || '2', 10) });
 
