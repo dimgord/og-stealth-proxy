@@ -464,6 +464,19 @@ app.get('/resolve', async (req, res) => {
         }
         // 3c) [FB share] немає 3xx → тягнемо HTML і шукаємо canonical/og/url/refresh/евристики
         if (isFbShare) {
+          // 3d) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
+          try {
+            console.info('[StealthProxy][resolve] fallback to OG canonical…');
+            const og = await getOgCanonical(candidate, { useBrowser: true, log: console });
+            if (og && og.url) {
+              const finalUrl = normalizeUrl(og.url);
+              if (finalUrl && finalUrl !== candidate) {
+                return res.json({ finalUrl, method: 'og-canonical' });
+              }
+            }
+          } catch (e) {
+            console.warn('[StealthProxy][resolve] og-canonical failed:', e.message || String(e));
+          }
           console.info('[StealthProxy][resolve] share: try HTML canonical');
           let canon = null;
           // спроба 1: www + _fb_noscript=1
@@ -491,20 +504,6 @@ app.get('/resolve', async (req, res) => {
             const finalUrl = normalizeUrl(canon);
             console.info('[StealthProxy][resolve] html-canonical →', finalUrl);
             return res.json({ finalUrl, method: 'html-canonical' });
-          }
-  
-          // 3d) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
-          try {
-            console.info('[StealthProxy][resolve] fallback to OG canonical…');
-            const og = await getOgCanonical(candidate, { useBrowser: true, log: console });
-            if (og && og.url) {
-              const finalUrl = normalizeUrl(og.url);
-              if (finalUrl && finalUrl !== candidate) {
-                return res.json({ finalUrl, method: 'og-canonical' });
-              }
-            }
-          } catch (e) {
-            console.warn('[StealthProxy][resolve] og-canonical failed:', e.message || String(e));
           }
         }
         // якщо нічого не вийшло — віддаємо нормалізоване як є
