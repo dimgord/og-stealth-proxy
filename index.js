@@ -237,6 +237,7 @@ app.get('/resolve', async (req, res) => {
     // 3) список шортенерів/редіректорів, для яких йдемо по мережі
     const needsNetworkHost = /^(?:fb\.me|l\.facebook\.com|l\.instagram\.com|t\.co|bit\.ly|tinyurl\.com|goo\.gl|ow\.ly)$/i;
     const isFbShare = host && /(?:^|\.)facebook\.com$/i.test(host) && /^\/share\/[a-z]\/[A-Za-z0-9]+\/?$/i.test(path);
+    console.info('[StealthProxy][resolve] host, isFbShare →', host, isFbShare);
     if (host && (needsNetworkHost.test(host) || isFbShare)) {
       console.info('[StealthProxy][resolve] network-follow for', candidate);
       try {
