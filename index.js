@@ -338,7 +338,7 @@ async function getOgCanonical_bad(rawUrl, { useBrowser = true, log = console } =
 }
 
 async function getOgCanonical(url, from, { useBrowser = true, log = console } = {}) {
-  return queue.add(async () => {
+  return await queue.add(async (url, from, useBrowser, log) => {
     let page;
     try {
       console.log('[StealthProxy] Navigating to', url);
