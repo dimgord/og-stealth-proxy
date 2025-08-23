@@ -340,7 +340,7 @@ async function getOgCanonical_bad(rawUrl, { useBrowser = true, log = console } =
 async function getOgCanonical(url, from, { useBrowser = true, log = console } = {}) {
   queue.add(async () => {
     let page;
-    let result;
+    let result = null;
     try {
       console.log('[StealthProxy] Navigating to', url);
       page = await browser.newPage();
@@ -365,7 +365,7 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
           consecutiveFailures = 0;
         }
         result = { status: 500, error: 'Page navigation error', message: err?.message };
-        return result;
+        throw new Error(result.message);
         //return res.status(500).json({ error: 'Page navigation error', message: err?.message });
       }
 
@@ -386,9 +386,9 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
       if (from === 'og-proxy') {
         if (!metadata.title && !metadata.description && !metadata.image) {
           console.warn('[StealthProxy] Empty metadata — skipping cache');
-          result = { status :500, error: 'Empty metadata — possibly bot protection', message: '' };
+          result = { status :500, error: 'Empty metadata — possibly bot protection', message: 'Empty metadata' };
           //return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
-          return result;
+          throw new Error(result);
         }
 
         if (metadata.image && metadata.image.trim() !== '') {
@@ -398,7 +398,7 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
           console.log('[StealthProxy] og-proxy: Not cached due to empty image');
         }
       } else if (from === 'resolve') {
-        if (metadata.url !== url) {
+        if (metadata.url && metadata.url !== url) {
           await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
           console.log('[StealthProxy] resolve: Cached result for', url);
         } else {
