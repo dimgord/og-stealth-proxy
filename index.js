@@ -337,7 +337,7 @@ async function getOgCanonical_bad(rawUrl, { useBrowser = true, log = console } =
   return og2;
 }
 
-async function getOgCanonical(url, { useBrowser = true, log = console } = {}) {
+async function getOgCanonical(url, from, { useBrowser = true, log = console } = {}) {
   queue.add(async () => {
     let page;
     let result;
@@ -364,7 +364,8 @@ async function getOgCanonical(url, { useBrowser = true, log = console } = {}) {
           browser = await puppeteer.launch(browserLaunchOpts);
           consecutiveFailures = 0;
         }
-        result = json({ status: 500, error: 'Page navigation error', message: err?.message });
+        result = { status: 500, error: 'Page navigation error', message: err?.message };
+        return result;
         //return res.status(500).json({ error: 'Page navigation error', message: err?.message });
       }
 
@@ -382,24 +383,34 @@ async function getOgCanonical(url, { useBrowser = true, log = console } = {}) {
 
       console.log('[StealthProxy] metadata:', metadata);
 
-      if (!metadata.title && !metadata.description && !metadata.image) {
-        console.warn('[StealthProxy] Empty metadata — skipping cache');
-        result = json({ status :500, error: 'Empty metadata — possibly bot protection', message: '' });
-        //return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
+      if (from === 'og-proxy') {
+        if (!metadata.title && !metadata.description && !metadata.image) {
+          console.warn('[StealthProxy] Empty metadata — skipping cache');
+          result = { status :500, error: 'Empty metadata — possibly bot protection', message: '' };
+          //return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
+          return result;
+        }
+
+        if (metadata.image && metadata.image.trim() !== '') {
+          await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
+          console.log('[StealthProxy] og-proxy: Cached result for', url);
+        } else {
+          console.log('[StealthProxy] og-proxy: Not cached due to empty image');
+        }
+      } else if (from === 'resolve') {
+        if (metadata.url !== url) {
+          await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
+          console.log('[StealthProxy] resolve: Cached result for', url);
+        } else {
+          console.log('[StealthProxy] resolve: Not cached due to not resolved url');
+        }
       }
 
-      if (metadata.image && metadata.image.trim() !== '') {
-        await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
-        console.log('[StealthProxy] Cached result for', url);
-      } else {
-        console.log('[StealthProxy] Not cached due to empty image');
-      }
-
-      result = json(metadata);
+      result = metadata;
       //res.json(metadata);
     } catch (err) {
       console.error('[StealthProxy] Error:', err?.message);
-      result = json({ status :500, error: 'Puppeteer error', message: err?.message });
+      result = { status :500, error: 'Puppeteer error', message: err?.message };
       //res.status(500).json({ error: 'Puppeteer error', message: err.message });
     } finally {
       if (page && !page.isClosed()) {
@@ -422,7 +433,7 @@ app.get('/og-proxy', async (req, res) => {
     return res.json(JSON.parse(cached));
   }
 
-  const og = await getOgCanonical(url, { useBrowser: true, log: console });
+  const og = await getOgCanonical(url, 'og-proxy', { useBrowser: true, log: console });
   return res.status(og.status || 200).json(og);
 });
 
@@ -451,6 +462,17 @@ app.get('/resolve', async (req, res) => {
     if (host && (needsNetworkHost.test(host) || isFbShare)) {
       console.info('[StealthProxy][resolve] network-follow for', candidate);
       try {
+        if (isFbShare) {
+          // 3d) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
+            console.info('[StealthProxy][resolve] fallback to OG canonical…');
+            const og = await getOgCanonical(candidate, 'resolve', { useBrowser: true, log: console });
+            if (og && og.url) {
+              const finalUrl = normalizeUrl(og.url);
+              if (finalUrl && finalUrl !== candidate) {
+                return res.json({ finalUrl, method: 'og-canonical' });
+              }
+            }
+        }
         // 3a) швидко: дати fetch'у самому пройти редіректи і взяти res.url
         const auto = await autoFollow(candidate, 10000);
         if (auto && auto !== candidate) {
@@ -466,27 +488,16 @@ app.get('/resolve', async (req, res) => {
           return res.json({ finalUrl, hops: out.hops, method: 'manual' });
         }
 
+        // 3) FB share/* часто без 30x → HTML/OG fallback
         if (isFbShare) {
-          // 3d) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
-            console.info('[StealthProxy][resolve] fallback to OG canonical…');
-            const og = await getOgCanonical(candidate, { useBrowser: true, log: console });
-            if (og && og.url) {
-              const finalUrl = normalizeUrl(og.url);
-              if (finalUrl && finalUrl !== candidate) {
-                return res.json({ finalUrl, method: 'og-canonical' });
-              }
-            }
+          console.info('[StealthProxy][resolve] share/*: try html/og canonical…');
+          const canon = await resolveViaOgCanonical(candidate).catch(()=>null);
+          if (canon && canon !== candidate) {
+            const finalUrl = normalizeUrl(canon);
+            console.info('[StealthProxy][resolve] html/og-canonical →', finalUrl);
+            return res.json({ finalUrl, method: 'html-canonical' });
           }
-      // 3) FB share/* часто без 30x → HTML/OG fallback
-      if (isFbShare) {
-        console.info('[StealthProxy][resolve] share/*: try html/og canonical…');
-        const canon = await resolveViaOgCanonical(candidate).catch(()=>null);
-        if (canon && canon !== candidate) {
-          const finalUrl = normalizeUrl(canon);
-          console.info('[StealthProxy][resolve] html/og-canonical →', finalUrl);
-          return res.json({ finalUrl, method: 'html-canonical' });
         }
-      }
 
 /*
         // 3c) [FB share] немає 3xx → тягнемо HTML і шукаємо canonical/og/url/refresh/евристики
