@@ -466,6 +466,7 @@ app.get('/resolve', async (req, res) => {
           // 3d) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
             console.info('[StealthProxy][resolve] fallback to OG canonical…');
             const og = await getOgCanonical(candidate, 'resolve', { useBrowser: true, log: console });
+            console.info('[StealthProxy][resolve] result: ', og);
             if (og && og.url) {
               const finalUrl = normalizeUrl(og.url);
               if (finalUrl && finalUrl !== candidate) {
