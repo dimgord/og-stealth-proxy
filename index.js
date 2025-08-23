@@ -337,9 +337,10 @@ async function getOgCanonical_bad(rawUrl, { useBrowser = true, log = console } =
   return og2;
 }
 
-async function getOgCanonical(url, res, { useBrowser = true, log = console } = {}) {
+async function getOgCanonical(url, { useBrowser = true, log = console } = {}) {
   queue.add(async () => {
     let page;
+    let result;
     try {
       console.log('[StealthProxy] Navigating to', url);
       page = await browser.newPage();
@@ -363,7 +364,8 @@ async function getOgCanonical(url, res, { useBrowser = true, log = console } = {
           browser = await puppeteer.launch(browserLaunchOpts);
           consecutiveFailures = 0;
         }
-        return res.status(500).json({ error: 'Page navigation error', message: err.message });
+        result = json({ status = 500; error: 'Page navigation error', message: err?.message });
+        //return res.status(500).json({ error: 'Page navigation error', message: err?.message });
       }
 
       const metadata = await page.evaluate(() => {
@@ -382,7 +384,8 @@ async function getOgCanonical(url, res, { useBrowser = true, log = console } = {
 
       if (!metadata.title && !metadata.description && !metadata.image) {
         console.warn('[StealthProxy] Empty metadata — skipping cache');
-        return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
+        result = json({ status = 500; error: 'Empty metadata — possibly bot protection', message: '' });
+        //return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
       }
 
       if (metadata.image && metadata.image.trim() !== '') {
@@ -392,14 +395,17 @@ async function getOgCanonical(url, res, { useBrowser = true, log = console } = {
         console.log('[StealthProxy] Not cached due to empty image');
       }
 
-      res.json(metadata);
+      result = json(metadata);
+      //res.json(metadata);
     } catch (err) {
-      console.error('[StealthProxy] Error:', err.message);
-      res.status(500).json({ error: 'Puppeteer error', message: err.message });
+      console.error('[StealthProxy] Error:', err?.message);
+      result = json({ status = 500; error: 'Puppeteer error', message: err?.message });
+      //res.status(500).json({ error: 'Puppeteer error', message: err.message });
     } finally {
       if (page && !page.isClosed()) {
         await page.close();
       }
+      return result;
     }
   });
 }
@@ -416,12 +422,12 @@ app.get('/og-proxy', async (req, res) => {
     return res.json(JSON.parse(cached));
   }
 
-  const og = await getOgCanonical(url, res, { useBrowser: true, log: console });
-  return res.json(og);
-
+  const og = await getOgCanonical(url, { useBrowser: true, log: console });
+  return res.status(og.status || 200).json(og);
 });
 
 app.get('/resolve', async (req, res) => {
+  let result;
   try {
     const inUrl = req.query.url;
     if (!inUrl) return res.status(400).json({ error: 'no url' });
@@ -463,7 +469,7 @@ app.get('/resolve', async (req, res) => {
         if (isFbShare) {
           // 3d) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
             console.info('[StealthProxy][resolve] fallback to OG canonical…');
-            const og = await getOgCanonical(candidate, res, { useBrowser: true, log: console });
+            const og = await getOgCanonical(candidate, { useBrowser: true, log: console });
             if (og && og.url) {
               const finalUrl = normalizeUrl(og.url);
               if (finalUrl && finalUrl !== candidate) {
