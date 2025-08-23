@@ -324,7 +324,7 @@ async function fetchOgViaBrowser(rawUrl, log = console) {
 }
 
 // Єдина точка входу: спершу HTTP, якщо треба — браузер
-async function getOgCanonical_bad(rawUrl, { useBrowser = true, log = console } = {}) {
+async function getOgCanonical_not_used(rawUrl, { useBrowser = true, log = console } = {}) {
   try {
     const og = await fetchOgViaHttpOnly(rawUrl);
     return og;
@@ -341,7 +341,7 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
   return await queue.add(() => runOg(url, from, { useBrowser, log }));
 }
 
-async function runOg(url, from, useBrowser, log) {
+async function runOg(url, from, { useBrowser = true, log = console }) {
   let page;
   try {
     console.log('[StealthProxy] Navigating to', url);
