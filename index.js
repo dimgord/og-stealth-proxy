@@ -338,83 +338,85 @@ async function getOgCanonical_bad(rawUrl, { useBrowser = true, log = console } =
 }
 
 async function getOgCanonical(url, from, { useBrowser = true, log = console } = {}) {
-  return await queue.add(async (url, from, useBrowser, log) => {
-    let page;
+  return await queue.add(() => runOg(url, from, { useBrowser, log }));
+}
+
+async function runOg(url, from, useBrowser, log) {
+  let page;
+  try {
+    console.log('[StealthProxy] Navigating to', url);
+    page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
+    await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
+    await page.setViewport({ width: 1366, height: 768 });
+
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    });
+
     try {
-      console.log('[StealthProxy] Navigating to', url);
-      page = await browser.newPage();
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
-      await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
-      await page.setViewport({ width: 1366, height: 768 });
-
-      await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      });
-
-      try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-        consecutiveFailures = 0;
-      } catch (err) {
-        console.error('[StealthProxy] Error during page.goto:', err.message);
-        consecutiveFailures++;
-        if (consecutiveFailures >= MAX_FAILURES) {
-          console.error('[StealthProxy] Too many failures — restarting browser...');
-          await browser.close();
-          browser = await puppeteer.launch(browserLaunchOpts);
-          consecutiveFailures = 0;
-        }
-        return { status: 500, error: 'Page navigation error', message: err?.message };
-        //return res.status(500).json({ error: 'Page navigation error', message: err?.message });
-      }
-
-      const metadata = await page.evaluate(() => {
-        const getMeta = (prop) =>
-          document.querySelector(`meta[property='og:${prop}']`)?.content ||
-          document.querySelector(`meta[name='og:${prop}']`)?.content || '';
-        return {
-          title: getMeta('title') || document.title || '',
-          description: getMeta('description') || '',
-          image: getMeta('image') || '',
-          url: getMeta('url') || location.href || '',
-        };
-      });
-
-      console.log('[StealthProxy] metadata:', metadata);
-
-      if (from === 'og-proxy') {
-        if (!metadata.title && !metadata.description && !metadata.image) {
-          console.warn('[StealthProxy] Empty metadata — skipping cache');
-          return { status :500, error: 'Empty metadata — possibly bot protection', message: 'Empty metadata' };
-          //return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
-        }
-
-        if (metadata.image && metadata.image.trim() !== '') {
-          await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
-          console.log('[StealthProxy] og-proxy: Cached result for', url);
-        } else {
-          console.log('[StealthProxy] og-proxy: Not cached due to empty image');
-        }
-      } else if (from === 'resolve') {
-        if (metadata.url && metadata.url !== url) {
-          await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
-          console.log('[StealthProxy] resolve: Cached result for', url);
-        } else {
-          console.log('[StealthProxy] resolve: Not cached due to not resolved url');
-        }
-      }
-
-      return(metadata);
-      //res.json(metadata);
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      consecutiveFailures = 0;
     } catch (err) {
+      console.error('[StealthProxy] Error during page.goto:', err.message);
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_FAILURES) {
+        console.error('[StealthProxy] Too many failures — restarting browser...');
+        await browser.close();
+        browser = await puppeteer.launch(browserLaunchOpts);
+        consecutiveFailures = 0;
+      }
+      return { status: 500, error: 'Page navigation error', message: err?.message };
+      //return res.status(500).json({ error: 'Page navigation error', message: err?.message });
+    }
+
+    const metadata = await page.evaluate(() => {
+      const getMeta = (prop) =>
+        document.querySelector(`meta[property='og:${prop}']`)?.content ||
+        document.querySelector(`meta[name='og:${prop}']`)?.content || '';
+      return {
+        title: getMeta('title') || document.title || '',
+        description: getMeta('description') || '',
+        image: getMeta('image') || '',
+        url: getMeta('url') || location.href || '',
+      };
+    });
+
+    console.log('[StealthProxy] metadata:', metadata);
+
+    if (from === 'og-proxy') {
+      if (!metadata.title && !metadata.description && !metadata.image) {
+        console.warn('[StealthProxy] Empty metadata — skipping cache');
+        return { status :500, error: 'Empty metadata — possibly bot protection', message: 'Empty metadata' };
+        //return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
+      }
+
+      if (metadata.image && metadata.image.trim() !== '') {
+        await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
+        console.log('[StealthProxy] og-proxy: Cached result for', url);
+      } else {
+        console.log('[StealthProxy] og-proxy: Not cached due to empty image');
+      }
+    } else if (from === 'resolve') {
+      if (metadata.url && metadata.url !== url) {
+        await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
+        console.log('[StealthProxy] resolve: Cached result for', url);
+      } else {
+        console.log('[StealthProxy] resolve: Not cached due to not resolved url');
+      }
+    }
+
+    return(metadata);
+    //res.json(metadata);
+  } catch (err) {
       console.error('[StealthProxy] Error:', err?.message);
       return { status :500, error: 'Puppeteer error', message: err?.message };
       //res.status(500).json({ error: 'Puppeteer error', message: err.message });
-    } finally {
+  } finally {
       if (page && !page.isClosed()) {
         await page.close();
       }
-    }
-  });
+  }
 }
 
 app.get('/og-proxy', async (req, res) => {
