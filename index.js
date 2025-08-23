@@ -364,7 +364,7 @@ async function getOgCanonical(url, { useBrowser = true, log = console } = {}) {
           browser = await puppeteer.launch(browserLaunchOpts);
           consecutiveFailures = 0;
         }
-        result = json({ status = 500; error: 'Page navigation error', message: err?.message });
+        result = json({ status: 500; error: 'Page navigation error', message: err?.message });
         //return res.status(500).json({ error: 'Page navigation error', message: err?.message });
       }
 
@@ -384,7 +384,7 @@ async function getOgCanonical(url, { useBrowser = true, log = console } = {}) {
 
       if (!metadata.title && !metadata.description && !metadata.image) {
         console.warn('[StealthProxy] Empty metadata — skipping cache');
-        result = json({ status = 500; error: 'Empty metadata — possibly bot protection', message: '' });
+        result = json({ status :500; error: 'Empty metadata — possibly bot protection', message: '' });
         //return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
       }
 
@@ -399,7 +399,7 @@ async function getOgCanonical(url, { useBrowser = true, log = console } = {}) {
       //res.json(metadata);
     } catch (err) {
       console.error('[StealthProxy] Error:', err?.message);
-      result = json({ status = 500; error: 'Puppeteer error', message: err?.message });
+      result = json({ status :500; error: 'Puppeteer error', message: err?.message });
       //res.status(500).json({ error: 'Puppeteer error', message: err.message });
     } finally {
       if (page && !page.isClosed()) {
