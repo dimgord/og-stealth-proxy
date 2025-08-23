@@ -338,8 +338,7 @@ async function getOgCanonical_bad(rawUrl, { useBrowser = true, log = console } =
 }
 
 async function getOgCanonical(url, from, { useBrowser = true, log = console } = {}) {
-  let result = null;
-  queue.add(async () => {
+  return queue.add(async () => {
     let page;
     try {
       console.log('[StealthProxy] Navigating to', url);
@@ -364,7 +363,7 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
           browser = await puppeteer.launch(browserLaunchOpts);
           consecutiveFailures = 0;
         }
-        result = { status: 500, error: 'Page navigation error', message: err?.message };
+        return { status: 500, error: 'Page navigation error', message: err?.message };
         //return res.status(500).json({ error: 'Page navigation error', message: err?.message });
       }
 
@@ -385,7 +384,7 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
       if (from === 'og-proxy') {
         if (!metadata.title && !metadata.description && !metadata.image) {
           console.warn('[StealthProxy] Empty metadata — skipping cache');
-          result = { status :500, error: 'Empty metadata — possibly bot protection', message: 'Empty metadata' };
+          return { status :500, error: 'Empty metadata — possibly bot protection', message: 'Empty metadata' };
           //return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
         }
 
@@ -404,17 +403,16 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
         }
       }
 
-      result = metadata;
+      return(metadata);
       //res.json(metadata);
     } catch (err) {
       console.error('[StealthProxy] Error:', err?.message);
-      result = { status :500, error: 'Puppeteer error', message: err?.message };
+      return { status :500, error: 'Puppeteer error', message: err?.message };
       //res.status(500).json({ error: 'Puppeteer error', message: err.message });
     } finally {
       if (page && !page.isClosed()) {
         await page.close();
       }
-      return result;
     }
   });
 }
