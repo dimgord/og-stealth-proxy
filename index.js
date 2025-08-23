@@ -392,14 +392,16 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
       }
 
       if (metadata.image && metadata.image.trim() !== '') {
-        await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
+        await redis.set(from+':'+url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
         console.log('[StealthProxy] og-proxy: Cached result for', url);
       } else {
         console.log('[StealthProxy] og-proxy: Not cached due to empty image');
       }
     } else if (from === 'resolve') {
       if (metadata.url && metadata.url !== url) {
-        await redis.set(url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
+        const cache = {};
+        cache.finalUrl = metadata.url;
+        await redis.set(from+':'+url, JSON.stringify(cache), 'EX', 60 * 60 * 10);
         console.log('[StealthProxy] resolve: Cached result for', url);
       } else {
         console.log('[StealthProxy] resolve: Not cached due to not resolved url');
@@ -425,7 +427,7 @@ app.get('/og-proxy', async (req, res) => {
     return res.status(400).json({ error: 'Invalid or missing URL' });
   }
 
-  const cached = await redis.get(url);
+  const cached = await redis.get('og-proxy:'+url);
   if (cached) {
     console.log('[StealthProxy] Cache hit for', url);
     return res.json(JSON.parse(cached));
@@ -441,7 +443,7 @@ app.get('/resolve', async (req, res) => {
     const inUrl = req.query.url;
     if (!inUrl) return res.status(400).json({ error: 'no url' });
 
-    const cached = await redis.get(inUrl);
+    const cached = await redis.get('resolve:'+inUrl);
       if (cached) {
       console.log('[StealthProxy] Cache hit for', inUrl);
       return res.json(JSON.parse(cached));
