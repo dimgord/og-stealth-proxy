@@ -442,6 +442,13 @@ app.get('/resolve', async (req, res) => {
   try {
     const inUrl = req.query.url;
     if (!inUrl) return res.status(400).json({ error: 'no url' });
+
+    const cached = await redis.get(inUrl);
+      if (cached) {
+      console.log('[StealthProxy] Cache hit for', inUrl);
+      return res.json(JSON.parse(cached));
+    }
+
     // 1) толерантний парсинг + авто-додавання https://
     let u;
     try { u = coerceUrl(inUrl); } catch { return res.status(400).json({ error: 'bad url' }); }
