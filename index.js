@@ -338,9 +338,9 @@ async function getOgCanonical_bad(rawUrl, { useBrowser = true, log = console } =
 }
 
 async function getOgCanonical(url, from, { useBrowser = true, log = console } = {}) {
+  let result = null;
   queue.add(async () => {
     let page;
-    let result = null;
     try {
       console.log('[StealthProxy] Navigating to', url);
       page = await browser.newPage();
@@ -365,7 +365,6 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
           consecutiveFailures = 0;
         }
         result = { status: 500, error: 'Page navigation error', message: err?.message };
-        throw new Error(result.message);
         //return res.status(500).json({ error: 'Page navigation error', message: err?.message });
       }
 
@@ -388,7 +387,6 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
           console.warn('[StealthProxy] Empty metadata — skipping cache');
           result = { status :500, error: 'Empty metadata — possibly bot protection', message: 'Empty metadata' };
           //return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
-          throw new Error(result);
         }
 
         if (metadata.image && metadata.image.trim() !== '') {
