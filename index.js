@@ -263,6 +263,10 @@ function isPrivateHost(host) {
 function normalizeUrl(raw) {
   try {
     const url = new URL(raw);
+
+    // Прибираємо подвійні слеші.
+    url.pathname = url.pathname.replace(/\/{2,}/g,'/');
+
     // unwrap l.instagram.com / l.facebook.com ?u=...
     if (/^l\.(?:facebook|instagram)\.com$/i.test(url.hostname)) {
       const u = url.searchParams.get('u');
@@ -361,7 +365,6 @@ async function gotoWithRetry(createPage, url, {
     } catch (e) {
       lastErr = e;
       log.warn?.(`[StealthProxy][puppeteer] goto attempt ${i+1}/${attempts} failed:`, e?.message || e);
-    } finally {
       // на кожній ітерації закриваємо сторінку без аварій
       try { if (page && !page.isClosed()) await page.close(); } catch {}
     }
@@ -405,6 +408,7 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
 }
 
 async function runOg(url, from, { useBrowser = true, log = console } = {}) {
+  let page = null;           // ← щоб finally завжди бачив змінну
   // 🔒 1) зробимо якісний рядок і нормалізацію
   let raw = toUrlString(url);
   if (!raw) {
@@ -425,9 +429,7 @@ async function runOg(url, from, { useBrowser = true, log = console } = {}) {
 
     const createPage = async () => {
       const browser = await getBrowser();
-      console.log('[StealthProxy] Creating page, browser:', browser);
       const p = await browser.newPage();
-      console.log('[StealthProxy] Creating page, page:', p);
       await p.setUserAgent(DEFAULT_UA_MOBILE);
       await p.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
       await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
@@ -441,7 +443,9 @@ async function runOg(url, from, { useBrowser = true, log = console } = {}) {
       return p;
     };
 
-    const { page, resp } = await gotoWithRetry(createPage, targetUrl, { attempts: 2, timeout: 15000, log: console });
+    const nav = await gotoWithRetry(createPage, targetUrl, { attempts: 2, timeout: 15000, log: console });
+    page = nav.page;
+    const resp = nav.resp;
     const html = await page.content();
     const finalUrl = (typeof resp?.url === 'function' ? resp.url() : targetUrl);
 
@@ -452,30 +456,29 @@ async function runOg(url, from, { useBrowser = true, log = console } = {}) {
 
     console.log('[StealthProxy] metadata:', metadata);
 
+    // 🧠 Кешуємо за ключем, що відповідає ТВОЄМУ читанню з маршруту (og-proxy:<inUrl>, resolve:<inUrl>)
+    // Використаємо НОРМАЛІЗОВАНИЙ вхідний URL як ключ (а не finalUrl), щоб хіти збігалися.
+    const cacheKey = `${from}:${normalizeUrl(url)}`;
     if (from === 'og-proxy') {
       if (!metadata.title && !metadata.description && !metadata.image) {
         console.warn('[StealthProxy] Empty metadata — skipping cache');
         return { status :500, error: 'Empty metadata — possibly bot protection', message: 'Empty metadata' };
-        //return res.status(500).json({ error: 'Empty metadata — possibly bot protection' });
       }
-
       if (metadata.image && metadata.image.trim() !== '') {
-        await redis.set(from+':'+finalUrl, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
-        console.log('[StealthProxy] og-proxy: Cached result for', finalUrl);
+        await redis.set(cacheKey, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
+        console.log('[StealthProxy] og-proxy: Cached result for', url);
       } else {
         console.log('[StealthProxy] og-proxy: Not cached due to empty image');
       }
     } else if (from === 'resolve') {
       if (metadata.url && metadata.url !== finalUrl) {
-        const cache = {};
-        cache.finalUrl = metadata.url;
-        await redis.set(from+':'+finalUrl, JSON.stringify(cache), 'EX', 60 * 60 * 10);
-        console.log('[StealthProxy] resolve: Cached result for', finalUrl);
+        const cache = { finalUrl: metadata.url };
+        await redis.set(cacheKey, JSON.stringify(cache), 'EX', 60 * 60 * 10);
+        console.log('[StealthProxy] resolve: Cached result for', url);
       } else {
         console.log('[StealthProxy] resolve: Not cached due to not resolved url');
       }
     }
-
     return(metadata);
   } catch (err) {
       console.error('[StealthProxy] Error:', err?.message);
@@ -486,18 +489,18 @@ async function runOg(url, from, { useBrowser = true, log = console } = {}) {
 }
 
 app.get('/og-proxy', async (req, res) => {
-  const url = req.query.url;
-  if (!url || !/^https?:\/\//.test(url)) {
+  const inUrl = req.query.url;
+  if (!inUrl || !/^https?:\/\//.test(inUrl)) {
     return res.status(400).json({ error: 'Invalid or missing URL' });
   }
 
-  const cached = await redis.get('og-proxy:'+url);
+  const cached = await redis.get('og-proxy:'+normalizeUrl(inUrl));  // ← той самий ключ, що і в runOg
   if (cached) {
-    console.log('[StealthProxy] Cache hit for', url);
+    console.log('[StealthProxy] Cache hit for', inUrl);
     return res.json(JSON.parse(cached));
   }
 
-  const og = await getOgCanonical(url, 'og-proxy', { useBrowser: true, log: console });
+  const og = await getOgCanonical(inUrl, 'og-proxy', { useBrowser: true, log: console });
   return res.status(og.status || 200).json(og);
 });
 
@@ -507,8 +510,8 @@ app.get('/resolve', async (req, res) => {
     const inUrl = req.query.url;
     if (!inUrl) return res.status(400).json({ error: 'no url' });
 
-    const cached = await redis.get('resolve:'+inUrl);
-      if (cached) {
+    const cached = await redis.get('resolve:'+normalizeUrl(inUrl)); // ← синхронізуємо з runOg
+    if (cached) {
       console.log('[StealthProxy] Cache hit for', inUrl);
       return res.json(JSON.parse(cached));
     }
@@ -658,8 +661,11 @@ app.listen(port, () => {
 });
 
 
-process.on('exit', () => safeCloseBrowser());
-process.on('SIGINT', () => process.exit());
+process.on('exit', () => await afeCloseBrowser());
+process.on('SIGINT', () => {
+  await safeCloseBrowser();
+  process.exit(0));
+}
 
 // Added error handling 08/24/25 - Слава Україні!
 process.on('unhandledRejection', (reason) => {
