@@ -234,12 +234,50 @@ async function followRedirectsManual(startUrl, { maxHops = 10, timeoutMs = 10000
   }
   return { finalUrl: current, hops, warning: 'max-hops' };
 }
+
+// --- safe puppeteer helpers ---
+async function safeClosePage(page, log = console) {
+  if (!page) return;
+  try {
+    // якщо target уже закрився — це кине TargetCloseError; ловимо і ігноруємо
+    if (!page.isClosed()) await page.close({ runBeforeUnload: false });
+  } catch (e) {
+    log.warn?.('[StealthProxy][puppeteer] safeClosePage:', e?.name || e?.message || e);
+  }
+}
+
+/** Стабільна навігація з 2–3 спробами, що ловить detach/network збої */
+async function gotoWithRetry(page, url, { attempts = 2, timeout = 15000, waitUntil = 'domcontentloaded', log = console } = {}) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const resp = await page.goto(url, { waitUntil, timeout });
+      // інколи Facebook повертає about:blank/перерване — даємо DOM підвантажитись
+      await page.waitForTimeout(300);
+      return resp;
+    } catch (e) {
+      lastErr = e;
+      log.warn?.(`[StealthProxy][puppeteer] goto attempt ${i+1}/${attempts} failed:`, e?.message || e);
+      // якщо сторінка/target відвалився — створимо нову сторінку на наступній ітерації
+      try { await safeClosePage(page, log); } catch {}
+      if (i < attempts - 1) {
+        // нова сторінка на повторну спробу
+        const browser = await getBrowser();
+        page = await browser.newPage();
+        await page.setUserAgent(DEFAULT_UA_MOBILE);
+        await page.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
+        await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
+      }
+    }
+  }
+  throw lastErr || new Error('goto-failed');
+}
  
 puppeteer.use(StealthPlugin());
 
 const redis = new Redis();
 const app = express();
-const queue = new PQueue({ concurrency: 5 });
+const queue = new PQueue({ concurrency: 2 });
 
 let browser;
 let consecutiveFailures = 0;
@@ -355,7 +393,9 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
     });
 
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      // Changed to gotoWithRetry()...
+      //await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.gotoWithRetry(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
       consecutiveFailures = 0;
     } catch (err) {
       console.error('[StealthProxy] Error during page.goto:', err.message);
@@ -415,9 +455,10 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
       return { status :500, error: 'Puppeteer error', message: err?.message };
       //res.status(500).json({ error: 'Puppeteer error', message: err.message });
   } finally {
-      if (page && !page.isClosed()) {
-        await page.close();
-      }
+      // if (page && !page.isClosed()) {
+      //  await page.close();
+      // }
+      await safeClosePage(page, log);
   }
 }
 
@@ -612,11 +653,21 @@ app.listen(port, () => {
   console.log(`[StealthProxy] Listening on port ${port}`);
 });
 
+
 process.on('exit', () => browser?.close());
 process.on('SIGINT', () => process.exit());
+
+// Added error handling 08/24/25 - Слава Україні!
+process.on('unhandledRejection', (reason) => {
+  console.warn('[StealthProxy] UnhandledRejection:', reason?.message || reason);
+});
+// process.on('uncaughtException', (err) => {
+// console.error(`Uncaught Exception at ${new Date().toISOString()}:`, err);
+// process.exit(1);
+// });
 process.on('uncaughtException', (err) => {
   console.error(`Uncaught Exception at ${new Date().toISOString()}:`, err);
-  process.exit(1);
+  // НЕ робимо process.exit — нехай живе; systemd сам перезапустить якщо справді все погано
 });
 
 function logMemoryUsage() {
