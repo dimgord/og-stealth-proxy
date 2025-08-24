@@ -395,7 +395,7 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
     try {
       // Changed to gotoWithRetry()...
       //await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await page.gotoWithRetry(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await gotoWithRetry(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
       consecutiveFailures = 0;
     } catch (err) {
       console.error('[StealthProxy] Error during page.goto:', err.message);
