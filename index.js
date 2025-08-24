@@ -661,11 +661,13 @@ app.listen(port, () => {
 });
 
 
-process.on('exit', () => await afeCloseBrowser());
+process.on('exit', () => {
+   await safeCloseBrowser();
+ });
 process.on('SIGINT', () => {
   await safeCloseBrowser();
-  process.exit(0));
-}
+  process.exit(0);
+});
 
 // Added error handling 08/24/25 - Слава Україні!
 process.on('unhandledRejection', (reason) => {
