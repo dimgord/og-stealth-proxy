@@ -60,8 +60,8 @@ async function getBrowser() {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-    '--single-process',
-    '--disable-crash-reporter',
+//    '--single-process',
+//    '--disable-crash-reporter',
       '--no-first-run',
       '--no-zygote',
       '--disable-default-apps',
@@ -343,28 +343,27 @@ async function safeClosePage(page, log = console) {
   }
 }
 
-/** Стабільна навігація з 2–3 спробами, що ловить detach/network збої */
-async function gotoWithRetry(page, url, { attempts = 2, timeout = 15000, waitUntil = 'domcontentloaded', log = console } = {}) {
+// Нова функція, фабрика замість сторінки
+async function gotoWithRetry(createPage, url, {
+  attempts = 2, timeout = 15000, waitUntil = 'domcontentloaded', log = console
+} = {}) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
+    let page;
     try {
+      page = await createPage();
+      if (!page || typeof page.goto !== 'function') {
+        throw new Error('Not a Puppeteer Page');
+      }
       const resp = await page.goto(url, { waitUntil, timeout });
-      // інколи Facebook повертає about:blank/перерване — даємо DOM підвантажитись
       await page.waitForTimeout(300);
-      return resp;
+      return { page, resp };
     } catch (e) {
       lastErr = e;
       log.warn?.(`[StealthProxy][puppeteer] goto attempt ${i+1}/${attempts} failed:`, e?.message || e);
-      // якщо сторінка/target відвалився — створимо нову сторінку на наступній ітерації
-      try { await safeClosePage(page, log); } catch {}
-      if (i < attempts - 1) {
-        // нова сторінка на повторну спробу
-        const browser = await getBrowser();
-        page = await browser.newPage();
-        await page.setUserAgent(DEFAULT_UA_MOBILE);
-        await page.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
-        await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
-      }
+    } finally {
+      // на кожній ітерації закриваємо сторінку без аварій
+      try { if (page && !page.isClosed()) await page.close(); } catch {}
     }
   }
   throw lastErr || new Error('goto-failed');
@@ -475,40 +474,39 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
   try { raw = decodeURIComponent(raw); } catch {}
   try { raw = decodeURIComponent(raw); } catch {}
   const targetUrl = normalizeUrl(raw);
-
-  let page;
+  
+  // страховка
+  if (typeof targetUrl !== 'string' || !targetUrl.startsWith('http')) {
+    return { status: 400, error: 'invalid-url', message: `Bad targetUrl: ${targetUrl} -> ${typeof targetUrl}` };
+  }
 
   try {
     console.log('[StealthProxy] Navigating to', targetUrl);
     const browser = await getBrowser();
-    page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
-    await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
-    await page.setViewport({ width: 1366, height: 768 });
+
+    const createPage = async () => {
+      const p = await browser.newPage();
+      await p.setUserAgent(DEFAULT_UA_MOBILE);
+      await p.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
+      await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
+      return p;
+    };
+
+    const { page, resp } = await gotoWithRetry(createPage, targetUrl, { attempts: 2, timeout: 15000, log: console });
+    const html = await page.content();
+    const finalUrl = (typeof resp?.url === 'function' ? resp.url() : targetUrl);
 
     // 🧪 додатковий лог типу — щоб більше таке не ловити
-    log.info?.('[StealthProxy][og] goto:', targetUrl, 'typeof:', typeof targetUrl);
+    log.info?.('[StealthProxy][og] goto:', finalUrl, 'typeof:', typeof finalUrl);
 
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      window.chrome = { runtime: {} };
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
+      Object.defineProperty(navigator, 'plugins', { 
+        get: () => [1, 2, 3, 4, 5],
+      });
     });
-
-    try {
-      // Changed to gotoWithRetry()...
-      //await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await gotoWithRetry(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      consecutiveFailures = 0;
-    } catch (err) {
-      console.error('[StealthProxy] Error during page.goto:', err.message);
-      consecutiveFailures++;
-      if (consecutiveFailures >= MAX_FAILURES) {
-        console.error('[StealthProxy] Too many failures — restarting browser...');
-        await safeCloseBrowser();
-        const browser = await getBrowser();
-        consecutiveFailures = 0;
-      }
-      return { status: 500, error: 'Page navigation error', message: err?.message };
-    }
 
     const metadata = await page.evaluate(() => {
       const getMeta = (prop) =>
@@ -532,17 +530,17 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
       }
 
       if (metadata.image && metadata.image.trim() !== '') {
-        await redis.set(from+':'+targetUrl, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
-        console.log('[StealthProxy] og-proxy: Cached result for', targetUrl);
+        await redis.set(from+':'+finalUrl, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
+        console.log('[StealthProxy] og-proxy: Cached result for', finalUrl);
       } else {
         console.log('[StealthProxy] og-proxy: Not cached due to empty image');
       }
     } else if (from === 'resolve') {
-      if (metadata.url && metadata.url !== targetUrl) {
+      if (metadata.url && metadata.url !== finalUrl) {
         const cache = {};
         cache.finalUrl = metadata.url;
-        await redis.set(from+':'+targetUrl, JSON.stringify(cache), 'EX', 60 * 60 * 10);
-        console.log('[StealthProxy] resolve: Cached result for', targetUrl);
+        await redis.set(from+':'+finalUrl, JSON.stringify(cache), 'EX', 60 * 60 * 10);
+        console.log('[StealthProxy] resolve: Cached result for', finalUrl);
       } else {
         console.log('[StealthProxy] resolve: Not cached due to not resolved url');
       }
