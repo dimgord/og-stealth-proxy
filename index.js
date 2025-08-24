@@ -1,8 +1,93 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import express from 'express';
 import Redis from 'ioredis';
 import PQueue from 'p-queue';
+
+// Obsoleted
+const browserLaunchOpts = {
+  headless: true,
+  executablePath: '/usr/bin/google-chrome-stable',
+  userDataDir: '/home/dimgord/.puppeteer_data',
+  args: [
+    '--headless',
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--single-process',
+    '--disable-crash-reporter',
+    '--no-zygote',
+  ],
+  protocolTimeout: 60000,
+};
+
+async function launchBrowser() {
+  console.log('[StealthProxy] Launching browser...');
+  browser = await puppeteer.launch(browserLaunchOpts);
+}
+// End obsoleted
+
+// Базова папка для профілів Chromium цього сервісу (можеш змінити на /var/tmp/ogproxy)
+const PROFILE_BASE = process.env.PPTR_PROFILE_BASE || path.join(os.tmpdir(), 'ogproxy-profile-');
+
+// Кеш поточного профілю
+let _profileDir = null;
+async function ensureProfileDir() {
+  if (_profileDir) return _profileDir;
+  _profileDir = await fs.promises.mkdtemp(PROFILE_BASE); // напр., /tmp/ogproxy-profile-abc123
+  return _profileDir;
+}
+
+// let _browser = null; <--- declared below, in start section
+async function getBrowser() {
+  if (_browser && _browser.isConnected()) return _browser;
+  console.log('[StealthProxy] Launching browser...');
+
+  const userDataDir = await ensureProfileDir();
+
+  _browser = await puppeteer.launch({
+    headless: true,
+    executablePath: '/usr/bin/google-chrome-stable',
+    userDataDir, // ← ← ВАЖЛИВО: унікальна директорія профілю
+    args: [
+      '--headless',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+    '--single-process',
+    '--disable-crash-reporter',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-default-apps',
+      '--disable-features=TranslateUI',
+      '--disable-features=NetworkServiceInProcess',
+      '--disable-bluetooth',            // щоб не тригерити bluez
+      `--user-data-dir=${userDataDir}`, // дублюємо як arg (деякі збірки поважають саме arg)
+    ],
+    protocolTimeout: 60000,
+  });
+
+  _browser.on('disconnected', () => { _browser = null; });
+  return _browser;
+}
+
+async function cleanupProfileDir() {
+  if (!_profileDir) return;
+  try {
+    await fs.promises.rm(_profileDir, { recursive: true, force: true });
+    console.info('[StealthProxy] Removed profile dir', _profileDir);
+  } catch (e) {
+    console.warn('[StealthProxy] Failed to remove profile dir', _profileDir, e?.message || e);
+  } finally {
+    _profileDir = null;
+  }
+}
 
 // ---------- resolve helpers ----------
 const RESOLVE_UA = 'StealthProxy/1.0 (+https://www.dimgord.cc)';
@@ -262,7 +347,7 @@ async function gotoWithRetry(page, url, { attempts = 2, timeout = 15000, waitUnt
       try { await safeClosePage(page, log); } catch {}
       if (i < attempts - 1) {
         // нова сторінка на повторну спробу
-        const browser = await launchBrowser();
+        const browser = await getBrowser();
         page = await browser.newPage();
         await page.setUserAgent(DEFAULT_UA_MOBILE);
         await page.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
@@ -279,7 +364,7 @@ const redis = new Redis();
 const app = express();
 const queue = new PQueue({ concurrency: 2 });
 
-let browser;
+let _browser = null;
 let consecutiveFailures = 0;
 const MAX_FAILURES = 5;
 
@@ -332,18 +417,7 @@ async function fetchOgViaHttpOnly(rawUrl) {
 
 async function fetchOgViaBrowser(rawUrl, log = console) {
   const puppeteer = require('puppeteer');
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-first-run',
-      '--no-zygote',
-      '--single-process',
-    ],
-  });
+  const browser = await getBrowser();
   try {
     const page = await browser.newPage();
     await page.setUserAgent(DEFAULT_UA_MOBILE);
@@ -357,7 +431,7 @@ async function fetchOgViaBrowser(rawUrl, log = console) {
     if (!og.title && !og.image && !og.url) throw new Error('og-empty');
     return og;
   } finally {
-    try { await browser.close(); } catch {}
+      await safeCloseBrowser();
   }
 }
 
@@ -383,6 +457,7 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
   let page;
   try {
     console.log('[StealthProxy] Navigating to', url);
+    const browser = await getBrowser();
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
@@ -402,12 +477,11 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
       consecutiveFailures++;
       if (consecutiveFailures >= MAX_FAILURES) {
         console.error('[StealthProxy] Too many failures — restarting browser...');
-        await browser.close();
-        browser = await puppeteer.launch(browserLaunchOpts);
+        await safeCloseBrowser();
+        const browser = await getBrowser();
         consecutiveFailures = 0;
       }
       return { status: 500, error: 'Page navigation error', message: err?.message };
-      //return res.status(500).json({ error: 'Page navigation error', message: err?.message });
     }
 
     const metadata = await page.evaluate(() => {
@@ -449,15 +523,10 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
     }
 
     return(metadata);
-    //res.json(metadata);
   } catch (err) {
       console.error('[StealthProxy] Error:', err?.message);
       return { status :500, error: 'Puppeteer error', message: err?.message };
-      //res.status(500).json({ error: 'Puppeteer error', message: err.message });
   } finally {
-      // if (page && !page.isClosed()) {
-      //  await page.close();
-      // }
       await safeClosePage(page, log);
   }
 }
@@ -511,17 +580,26 @@ app.get('/resolve', async (req, res) => {
       console.info('[StealthProxy][resolve] network-follow for', candidate);
       try {
         if (isFbShare) {
-          // 3d) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
-            console.info('[StealthProxy][resolve] fallback to OG canonical…');
-            const og = await getOgCanonical(candidate, 'resolve', { useBrowser: true, log: console });
-            console.info('[StealthProxy][resolve] result: ', og);
-            if (og && og.url) {
-              const finalUrl = normalizeUrl(og.url);
-              if (finalUrl && finalUrl !== candidate) {
-                return res.json({ finalUrl, method: 'og-canonical' });
-              }
+          // 3 0) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
+          console.info('[StealthProxy][resolve] fallback to OG canonical…');
+          const og = await getOgCanonical(candidate, 'resolve', { useBrowser: true, log: console });
+          console.info('[StealthProxy][resolve] result: ', og);
+          if (og && og.url) {
+            const finalUrl = normalizeUrl(og.url);
+            if (finalUrl && finalUrl !== candidate) {
+              return res.json({ finalUrl, method: 'og-canonical' });
             }
+          }
+          // 3) FB share/* часто без 30x → HTML/OG fallback
+          console.info('[StealthProxy][resolve] share/*: try html/og canonical…');
+          const canon = await resolveViaOgCanonical(candidate).catch(()=>null);
+          if (canon && canon !== candidate) {
+            const finalUrl = normalizeUrl(canon);
+            console.info('[StealthProxy][resolve] html/og-canonical →', finalUrl);
+            return res.json({ finalUrl, method: 'html-canonical' });
+          }
         }
+/*
         // 3a) швидко: дати fetch'у самому пройти редіректи і взяти res.url
         const auto = await autoFollow(candidate, 10000);
         if (auto && auto !== candidate) {
@@ -536,18 +614,7 @@ app.get('/resolve', async (req, res) => {
           console.info('[StealthProxy][resolve] manual-follow →', finalUrl);
           return res.json({ finalUrl, hops: out.hops, method: 'manual' });
         }
-
-        // 3) FB share/* часто без 30x → HTML/OG fallback
-        if (isFbShare) {
-          console.info('[StealthProxy][resolve] share/*: try html/og canonical…');
-          const canon = await resolveViaOgCanonical(candidate).catch(()=>null);
-          if (canon && canon !== candidate) {
-            const finalUrl = normalizeUrl(canon);
-            console.info('[StealthProxy][resolve] html/og-canonical →', finalUrl);
-            return res.json({ finalUrl, method: 'html-canonical' });
-          }
-        }
-
+*/
 /*
         // 3c) [FB share] немає 3xx → тягнемо HTML і шукаємо canonical/og/url/refresh/евристики
         if (isFbShare) {
@@ -606,46 +673,29 @@ app.get('/resolve', async (req, res) => {
     // 4) для «звичайних» лінків достатньо нормалізації
     console.info('[StealthProxy][resolve] normalized only →', candidate);
     return res.json({ finalUrl: candidate });
-} catch (e) {
+  } catch (e) {
     console.error('resolve error', e);
     return res.status(500).json({ error: 'Resolve failed' });
   }
 });
 
-const browserLaunchOpts = {
-  headless: true,
-  executablePath: '/usr/bin/google-chrome-stable',
-  userDataDir: '/home/dimgord/.puppeteer_data',
-  args: [
-    '--headless',
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-gpu',
-    '--single-process',
-    '--disable-crash-reporter',
-    '--no-zygote',
-  ],
-  protocolTimeout: 60000,
-};
-
-async function launchBrowser() {
-  console.log('[StealthProxy] Launching browser...');
-  browser = await puppeteer.launch(browserLaunchOpts);
+async function safeCloseBrowser() {
+  try { if (_browser) { await _browser.close(); _browser = null; } } catch {}
+  await cleanupProfileDir();
 }
 
 // Запуск браузера з перезапуском щогодини
 (async () => {
-  await launchBrowser();
-setInterval(async () => {
-  try {
-    console.log(`[StealthProxy] Scheduled browser restart at ${new Date().toISOString()}`);
-    await browser.close();
-    await launchBrowser();
-  } catch (err) {
-    console.error('[StealthProxy] Error during scheduled restart:', err);
-  }
-}, 60 * 60 * 1000); // 1 година
+  await getBrowser();
+  setInterval(async () => {
+    try {
+      console.log(`[StealthProxy] Scheduled browser restart at ${new Date().toISOString()}`);
+      await safeCloseBrowser();
+      await getBrowser();
+    } catch (err) {
+      console.error('[StealthProxy] Error during scheduled restart:', err);
+    }
+  }, 60 * 60 * 1000); // 1 година
 })();
 
 const port = process.env.PORT || 3000;
@@ -654,7 +704,7 @@ app.listen(port, () => {
 });
 
 
-process.on('exit', () => browser?.close());
+process.on('exit', () => safeCloseBrowser());
 process.on('SIGINT', () => process.exit());
 
 // Added error handling 08/24/25 - Слава Україні!
