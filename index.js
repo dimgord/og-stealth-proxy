@@ -95,6 +95,18 @@ const RESOLVE_LANG = 'en-US,en;q=0.9,uk-UA;q=0.8';
 
 // --- put near other helpers in index.js ---
 
+// гарантовано приводимо до строки
+function toUrlString(u) {
+  if (typeof u === 'string') return u;
+  if (u && typeof u === 'object') {
+    // якщо це URL або об’єкт { url: '...' }
+    if (typeof u.url === 'string') return u.url;
+    if (typeof u.href === 'string') return u.href;
+    try { return String(u); } catch { /* fallthrough */ }
+  }
+  return '';
+}
+
 function pickCanonicalFromHtml(html, baseUrl) {
   if (!html) return null;
   let m = html.match(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i);
@@ -454,14 +466,28 @@ async function getOgCanonical(url, from, { useBrowser = true, log = console } = 
 }
 
 async function runOg(url, from, { useBrowser = true, log = console }) {
+  // 🔒 1) зробимо якісний рядок і нормалізацію
+  let raw = toUrlString(url);
+  if (!raw) {
+    return { status: 400, error: 'invalid-url', message: 'Empty or non-serializable URL' };
+  }
+  // якщо треба – двічі декодуємо і нормалізуємо
+  try { raw = decodeURIComponent(raw); } catch {}
+  try { raw = decodeURIComponent(raw); } catch {}
+  const targetUrl = normalizeUrl(raw);
+
   let page;
+
   try {
-    console.log('[StealthProxy] Navigating to', url);
+    console.log('[StealthProxy] Navigating to', targetUrl);
     const browser = await getBrowser();
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
     await page.setViewport({ width: 1366, height: 768 });
+
+    // 🧪 додатковий лог типу — щоб більше таке не ловити
+    log.info?.('[StealthProxy][og] goto:', targetUrl, 'typeof:', typeof targetUrl);
 
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
@@ -469,8 +495,8 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
 
     try {
       // Changed to gotoWithRetry()...
-      //await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await gotoWithRetry(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      //await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await gotoWithRetry(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
       consecutiveFailures = 0;
     } catch (err) {
       console.error('[StealthProxy] Error during page.goto:', err.message);
@@ -506,17 +532,17 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
       }
 
       if (metadata.image && metadata.image.trim() !== '') {
-        await redis.set(from+':'+url, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
-        console.log('[StealthProxy] og-proxy: Cached result for', url);
+        await redis.set(from+':'+targetUrl, JSON.stringify(metadata), 'EX', 60 * 60 * 10);
+        console.log('[StealthProxy] og-proxy: Cached result for', targetUrl);
       } else {
         console.log('[StealthProxy] og-proxy: Not cached due to empty image');
       }
     } else if (from === 'resolve') {
-      if (metadata.url && metadata.url !== url) {
+      if (metadata.url && metadata.url !== targetUrl) {
         const cache = {};
         cache.finalUrl = metadata.url;
-        await redis.set(from+':'+url, JSON.stringify(cache), 'EX', 60 * 60 * 10);
-        console.log('[StealthProxy] resolve: Cached result for', url);
+        await redis.set(from+':'+targetUrl, JSON.stringify(cache), 'EX', 60 * 60 * 10);
+        console.log('[StealthProxy] resolve: Cached result for', targetUrl);
       } else {
         console.log('[StealthProxy] resolve: Not cached due to not resolved url');
       }
