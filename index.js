@@ -661,10 +661,10 @@ app.listen(port, () => {
 });
 
 
-process.on('exit', () => {
+process.on('exit', async () => {
    await safeCloseBrowser();
  });
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   await safeCloseBrowser();
   process.exit(0);
 });
