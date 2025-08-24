@@ -482,9 +482,9 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
 
   try {
     console.log('[StealthProxy] Navigating to', targetUrl);
-    const browser = await getBrowser();
 
     const createPage = async () => {
+      const browser = await getBrowser();
       const p = await browser.newPage();
       await p.setUserAgent(DEFAULT_UA_MOBILE);
       await p.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
