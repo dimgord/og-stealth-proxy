@@ -538,6 +538,28 @@ app.get('/resolve', async (req, res) => {
       console.info('[StealthProxy][resolve] network-follow for', candidate);
       try {
         if (isFbShare) {
+          // 3a) швидко: дати fetch'у самому пройти редіректи і взяти res.url
+          const auto = await autoFollow(candidate, 10000);
+          if (auto && auto !== candidate) {
+            const finalUrl = normalizeUrl(auto);
+            console.info('[StealthProxy][resolve] auto-follow →', finalUrl);
+            return res.json({ finalUrl, method: 'auto' });
+          }
+          // 3b) manual hops
+          const out = await followRedirectsManual(candidate, { maxHops: 10, timeoutMs: 10000, log: console });
+          if (out.finalUrl && out.finalUrl !== candidate) {
+            const finalUrl = normalizeUrl(out.finalUrl);
+            console.info('[StealthProxy][resolve] manual-follow →', finalUrl);
+            return res.json({ finalUrl, hops: out.hops, method: 'manual' });
+          }
+          // 3) FB share/* часто без 30x → HTML/OG fallback
+          console.info('[StealthProxy][resolve] share/*: try html/og canonical…');
+          const canon = await resolveViaOgCanonical(candidate).catch(()=>null);
+          if (canon && canon !== candidate) {
+            const finalUrl = normalizeUrl(canon);
+            console.info('[StealthProxy][resolve] html/og-canonical →', finalUrl);
+            return res.json({ finalUrl, method: 'html-canonical' });
+          }
           // 3 0) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
           console.info('[StealthProxy][resolve] fallback to OG canonical…');
           const og = await getOgCanonical(candidate, 'resolve', { useBrowser: true, log: console });
@@ -548,31 +570,7 @@ app.get('/resolve', async (req, res) => {
               return res.json({ finalUrl, method: 'og-canonical' });
             }
           }
-          // 3) FB share/* часто без 30x → HTML/OG fallback
-          console.info('[StealthProxy][resolve] share/*: try html/og canonical…');
-          const canon = await resolveViaOgCanonical(candidate).catch(()=>null);
-          if (canon && canon !== candidate) {
-            const finalUrl = normalizeUrl(canon);
-            console.info('[StealthProxy][resolve] html/og-canonical →', finalUrl);
-            return res.json({ finalUrl, method: 'html-canonical' });
-          }
         }
-/*
-        // 3a) швидко: дати fetch'у самому пройти редіректи і взяти res.url
-        const auto = await autoFollow(candidate, 10000);
-        if (auto && auto !== candidate) {
-          const finalUrl = normalizeUrl(auto);
-          console.info('[StealthProxy][resolve] auto-follow →', finalUrl);
-          return res.json({ finalUrl, method: 'auto' });
-        }
-        // 3b) manual hops
-        const out = await followRedirectsManual(candidate, { maxHops: 10, timeoutMs: 10000, log: console });
-        if (out.finalUrl && out.finalUrl !== candidate) {
-          const finalUrl = normalizeUrl(out.finalUrl);
-          console.info('[StealthProxy][resolve] manual-follow →', finalUrl);
-          return res.json({ finalUrl, hops: out.hops, method: 'manual' });
-        }
-*/
 /*
         // 3c) [FB share] немає 3xx → тягнемо HTML і шукаємо canonical/og/url/refresh/евристики
         if (isFbShare) {
