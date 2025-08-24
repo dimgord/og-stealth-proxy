@@ -262,7 +262,7 @@ async function gotoWithRetry(page, url, { attempts = 2, timeout = 15000, waitUnt
       try { await safeClosePage(page, log); } catch {}
       if (i < attempts - 1) {
         // нова сторінка на повторну спробу
-        const browser = await getBrowser();
+        const browser = await launchBrowser();
         page = await browser.newPage();
         await page.setUserAgent(DEFAULT_UA_MOBILE);
         await page.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
