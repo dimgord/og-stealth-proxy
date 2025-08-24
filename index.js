@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
@@ -360,7 +361,7 @@ async function gotoWithRetry(createPage, url, {
         throw new Error('Not a Puppeteer Page');
       }
       const resp = await page.goto(url, { waitUntil, timeout });
-      await page.waitForTimeout(300);
+      await delay(300);
       return { page, resp };
     } catch (e) {
       lastErr = e;
