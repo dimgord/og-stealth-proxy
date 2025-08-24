@@ -400,71 +400,11 @@ function extractOg(html, baseUrl) {
   return { title, description, image, url };
 }
 
-async function fetchHtmlForOG(rawUrl, timeoutMs = 9000) {
-  const ctrl = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
-  const res = await fetch(rawUrl, {
-    method: 'GET',
-    redirect: 'follow',
-    headers: {
-      'user-agent': DEFAULT_UA_MOBILE,
-      'accept-language': DEFAULT_LANG,
-      'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'upgrade-insecure-requests': '1',
-    },
-    signal: ctrl,
-  });
-  const ctype = (res.headers.get('content-type') || '').toLowerCase();
-  if (!ctype.includes('text/html')) throw new Error('non-html');
-  const html = await res.text();
-  return { url: res.url || rawUrl, html };
-}
-
-async function fetchOgViaHttpOnly(rawUrl) {
-  const { url: finalUrl, html } = await fetchHtmlForOG(rawUrl, 9000);
-  const og = extractOg(html, finalUrl);
-  if (!og.title && !og.image && !og.url) throw new Error('og-not-found');
-  return og;
-}
-
-async function fetchOgViaBrowser(rawUrl, log = console) {
-  const puppeteer = require('puppeteer');
-  const browser = await getBrowser();
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent(DEFAULT_UA_MOBILE);
-    await page.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
-    await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
-    log.info?.('[StealthProxy][og] goto', rawUrl);
-    const resp = await page.goto(rawUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForTimeout(400);
-    const html = await page.content();
-    const og = extractOg(html, resp?.url() || rawUrl);
-    if (!og.title && !og.image && !og.url) throw new Error('og-empty');
-    return og;
-  } finally {
-      await safeCloseBrowser();
-  }
-}
-
-// Єдина точка входу: спершу HTTP, якщо треба — браузер
-async function getOgCanonical_not_used(rawUrl, { useBrowser = true, log = console } = {}) {
-  try {
-    const og = await fetchOgViaHttpOnly(rawUrl);
-    return og;
-  } catch (e) {
-    log.warn?.('[StealthProxy][og] http path failed →', e.message || String(e));
-    if (!useBrowser) throw e;
-  }
-  // fallback: puppeteer
-  const og2 = await fetchOgViaBrowser(rawUrl, log);
-  return og2;
-}
-
 async function getOgCanonical(url, from, { useBrowser = true, log = console } = {}) {
   return await queue.add(() => runOg(url, from, { useBrowser, log }));
 }
 
-async function runOg(url, from, { useBrowser = true, log = console }) {
+async function runOg(url, from, { useBrowser = true, log = console } = {}) {
   // 🔒 1) зробимо якісний рядок і нормалізацію
   let raw = toUrlString(url);
   if (!raw) {
@@ -485,10 +425,19 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
 
     const createPage = async () => {
       const browser = await getBrowser();
+      console.log('[StealthProxy] Creating page, browser:', browser);
       const p = await browser.newPage();
+      console.log('[StealthProxy] Creating page, page:', p);
       await p.setUserAgent(DEFAULT_UA_MOBILE);
       await p.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
       await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
+      await p.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        // (опційно)
+        window.chrome = { runtime: {} };
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
+      });
       return p;
     };
 
@@ -499,26 +448,7 @@ async function runOg(url, from, { useBrowser = true, log = console }) {
     // 🧪 додатковий лог типу — щоб більше таке не ловити
     log.info?.('[StealthProxy][og] goto:', finalUrl, 'typeof:', typeof finalUrl);
 
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      window.chrome = { runtime: {} };
-      Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
-      Object.defineProperty(navigator, 'plugins', { 
-        get: () => [1, 2, 3, 4, 5],
-      });
-    });
-
-    const metadata = await page.evaluate(() => {
-      const getMeta = (prop) =>
-        document.querySelector(`meta[property='og:${prop}']`)?.content ||
-        document.querySelector(`meta[name='og:${prop}']`)?.content || '';
-      return {
-        title: getMeta('title') || document.title || '',
-        description: getMeta('description') || '',
-        image: getMeta('image') || '',
-        url: getMeta('url') || location.href || '',
-      };
-    });
+    const metadata = await extractOg(html, finalUrl);
 
     console.log('[StealthProxy] metadata:', metadata);
 
