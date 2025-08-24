@@ -9,30 +9,6 @@ import express from 'express';
 import Redis from 'ioredis';
 import PQueue from 'p-queue';
 
-// Obsoleted
-const browserLaunchOpts = {
-  headless: true,
-  executablePath: '/usr/bin/google-chrome-stable',
-  userDataDir: '/home/dimgord/.puppeteer_data',
-  args: [
-    '--headless',
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-gpu',
-    '--single-process',
-    '--disable-crash-reporter',
-    '--no-zygote',
-  ],
-  protocolTimeout: 60000,
-};
-
-async function launchBrowser() {
-  console.log('[StealthProxy] Launching browser...');
-  browser = await puppeteer.launch(browserLaunchOpts);
-}
-// End obsoleted
-
 // Базова папка для профілів Chromium цього сервісу (можеш змінити на /var/tmp/ogproxy)
 const PROFILE_BASE = process.env.PPTR_PROFILE_BASE || path.join(os.tmpdir(), 'ogproxy-profile-');
 
@@ -61,8 +37,8 @@ async function getBrowser() {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-//    '--single-process',
-//    '--disable-crash-reporter',
+      '--single-process',
+      '--disable-crash-reporter',
       '--no-first-run',
       '--no-zygote',
       '--disable-default-apps',
