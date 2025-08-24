@@ -364,8 +364,9 @@ app.get('/', (_, res) => {
 });
 
 // ---------- OG canonical helpers (shared by /og-proxy and /resolve) ----------
-const DEFAULT_UA_MOBILE =
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1';
+const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36';
+
+const DEFAULT_UA_MOBILE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1';
 const DEFAULT_LANG = 'en-US,en;q=0.9,uk-UA;q=0.8';
 
 function extractOg(html, baseUrl) {
@@ -407,7 +408,7 @@ async function runOg(url, from, { useBrowser = true, log = console } = {}) {
     const createPage = async () => {
       const browser = await getBrowser();
       const p = await browser.newPage();
-      await p.setUserAgent(DEFAULT_UA_MOBILE);
+      await p.setUserAgent(DEFAULT_UA);
       await p.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
       await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
       await p.evaluateOnNewDocument(() => {
