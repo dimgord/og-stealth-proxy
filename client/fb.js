@@ -126,7 +126,7 @@ $(function () {
     }
   }
 
-  async function tryEmbedFbPost(href) {
+  async function tryEmbedFbPost(href, $link, contentBlock) {
     const r = await fetch(CAN_EMB_API + encodeURIComponent(href)).then(x=>x.json()).catch(()=>({ok:false}));
     if (r.ok) {
       // вставляємо fb-post
@@ -408,7 +408,7 @@ $(function () {
                 .replace(/(\?|&)share_url=[^&#]*/gi, '')
                 .replace(/(\?|&)m=1\b/gi, '')
                 .replace(/[#?]&?$/,''); // зайві хвости
-              tryEmbedFbPost(cleanHref);
+              tryEmbedFbPost(cleanHref, $link, contentBlock);
               // if (contentBlock.find('#' + widgetId).length === 0) {
               //   $link.after(
               //     '<div id="' + widgetId + '" class="fb-post" ' +
