@@ -241,19 +241,42 @@ function normalizeUrl(raw) {
   try {
     const url = new URL(raw);
 
-    // Прибираємо подвійні слеші.
-    url.pathname = url.pathname.replace(/\/{2,}/g,'/');
-
-    // unwrap l.instagram.com / l.facebook.com ?u=...
+    // unwrap l.facebook.com / l.instagram.com
     if (/^l\.(?:facebook|instagram)\.com$/i.test(url.hostname)) {
       const u = url.searchParams.get('u');
       if (u) return normalizeUrl(u);
     }
-    // clean noise
+
+    // ---- NEW: hard‑clean FB tracking on group permalinks ----
+    const isFb = /(?:^|\.)facebook\.com$/i.test(url.hostname);
+    if (isFb) {
+      // загальні трекери
+      for (const k of Array.from(url.searchParams.keys())) {
+        if (/^(utm_|fbclid|refid|sfnsn|mibextid|paipv|ref)$/i.test(k)) {
+          url.searchParams.delete(k);
+        }
+      }
+      // особливий кейс: посилання з share_url/rdid у групових permalink
+      if (/^\/groups\/[^/]+\/permalink\//i.test(url.pathname)) {
+        url.searchParams.delete('rdid');
+        url.searchParams.delete('share_url');
+        // на всякий — прибираємо hash із цими параметрами
+        if (url.hash && /share_url=|rdid=/.test(url.hash)) {
+          url.hash = '';
+        }
+      }
+      // часто зустрічається параметр m=1 / ?mibextid= — геть
+      if (url.searchParams.get('m') === '1') url.searchParams.delete('m');
+    }
+
+    // instagram дрібні хвости
     url.searchParams.delete('igshid');
+
+    // UTM-шум
     for (const k of Array.from(url.searchParams.keys())) {
       if (/^utm_/i.test(k)) url.searchParams.delete(k);
     }
+
     return url.toString();
   } catch {
     return raw;
@@ -609,6 +632,35 @@ app.get('/resolve', async (req, res) => {
   } catch (e) {
     console.error('resolve error', e);
     return res.status(500).json({ error: 'Resolve failed' });
+  }
+});
+
+async function canEmbedFbPost(href, timeoutMs = 8000) {
+  const ctrl = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
+  const url = 'https://www.facebook.com/plugins/post.php?omitscript=true&href=' + encodeURIComponent(href);
+  const res = await fetch(url, {
+    method: 'GET',
+    redirect: 'follow',
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+      'accept-language': 'en-US,en;q=0.9,uk-UA;q=0.8',
+      'accept': 'text/html,*/*;q=0.8',
+    },
+    signal: ctrl,
+  });
+  if (!res.ok) return false;
+  const html = await res.text();
+  return !/This Facebook post is no longer available/i.test(html);
+}
+
+app.get('/can-embed-fb', async (req, res) => {
+  try {
+    const href = normalizeUrl(String(req.query.href || ''));
+    if (!href) return res.status(400).json({ ok: false });
+    const ok = await canEmbedFbPost(href);
+    res.json({ ok });
+  } catch {
+    res.json({ ok: false });
   }
 });
 

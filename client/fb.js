@@ -5,35 +5,68 @@ $(function () {
   const RESOLVE_API = PROXY + '/resolve?url=';
   const OG_API = PROXY + '/og-proxy?url=';
 
+// ====== DETECTORS ======
+  const isVideo = (u) => {
+    const s = String(u || '');
+    let m;
+    // 1) watch?v=<id>
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/watch\/?\?v=(\d+)/i.exec(s);
+    if (m) return {id: m[1], type: 'watch'};
+    // 2) <user>/videos/<slug>/<id>  або  <user>/videos/<id>
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/([^\/?#]+)\/videos\/(?:[^\/?#]+\/)?(\d+)/i.exec(s);
+    if (m) return {id: m[2], type: 'user', user: m[1]};
+    // 3) /videos/<id>
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/videos\/(\d+)/i.exec(s);
+    if (m) return {id: m[1], type: 'videos'};
+    return null;
+  };
+
+  const isReel = (u) => /^https?:\/\/(?:www\.)?facebook\.com\/reel\/([A-Za-z0-9]+)/i.exec(String(u || ''));
+
+  const isFbPost = (u) => {
+    const s = String(u || '');
+    let m;
+    // groups/<group>/posts/<id>
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/groups\/[^\/?#]+\/posts\/(\d+)/i.exec(s);
+    if (m) return {type: 'post', id: m[1], href: s};
+    // user/page posts з опційним slug
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/([^\/?#]+)\/posts\/(?:[^\/?#]+\/)?(\d+)/i.exec(s);
+    if (m) return { type: 'post', id: m[2], href: s, user: m[1] };
+    // permalink.php?story_fbid=...
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/permalink\.php\?[^#]*\bstory_fbid=(\d+)/i.exec(s);
+    if (m) return {type: 'post', id: m[1], href: s};
+    // story.php?story_fbid=...
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/story\.php\?[^#]*\bstory_fbid=(\d+)/i.exec(s);
+    if (m) return {type: 'post', id: m[1], href: s};
+    // photo/?fbid=... — теж рендеримо як пост (офіційного photo-embed немає)
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/photo\/\?[^#]*\bfbid=(\d+)/i.exec(s);
+    if (m) return {type: 'post', id: m[1], href: s};
+    return null;
+  };
+
+// «класичні» фото-URL
+  const isPhotoNew = (u) => /^https?:\/\/(?:www\.)?facebook\.com\/photo\/\?[^#]*\bfbid=(\d+)/i.exec(String(u || ''));
+  const isAlbumPhoto = (u) => {
+    const s = String(u || '');
+    // photo.php?fbid=<id>
+    let m = /^https?:\/\/(?:www\.)?facebook\.com\/photo\.php\?[^#]*\bfbid=(\d+)/i.exec(s);
+    if (m) return m;
+    // <user>/photos/<anything>/<id>
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/[^\/?#]+\/photos\/[^\/?#]+\/(\d+)/i.exec(s);
+    return m;
+  };
+
+  const isStory = (u) => /^https?:\/\/(?:www\.)?facebook\.com\/story\.php\?/i.test(String(u || ''));
+  const isPermalink = (u) => /^https?:\/\/(?:www\.)?facebook\.com\/permalink\.php\?/i.test(String(u || ''));
+  const isEvent = (u) => /^https?:\/\/(?:www\.)?facebook\.com\/events\/(\d+)/i.exec(String(u || ''));
+
+
   // --- helpers ---
   const isFbShort = (u) => /^https?:\/\/fb\.me\/.+/i.test(u);
   const normFb = (u) => u.replace(/^https?:\/\/m\.facebook\.com/i, 'https://www.facebook.com');
 
   const isPost = (u) => /https?:\/\/www\.facebook\.com\/([^\/?]+)\/posts\/(\d+)/i.exec(u);
-  const isVideo = (u) => {
-    const s = String(u || '');
-    let m;
-  
-    // https://www.facebook.com/watch?v=123
-    m = /^https?:\/\/(?:www\.)?facebook\.com\/watch\/?\?v=(\d+)/i.exec(s);
-    if (m) return { id: m[1], type: 'watch' };
-  
-    // https://www.facebook.com/<user>/videos/<slug>/<id>/  або  /<user>/videos/<id>/
-    m = /^https?:\/\/(?:www\.)?facebook\.com\/([^\/?#]+)\/videos\/(?:[^\/?#]+\/)?(\d+)/i.exec(s);
-    if (m) return { id: m[2], type: 'user', user: m[1] };
-  
-    // https://www.facebook.com/videos/123
-    m = /^https?:\/\/(?:www\.)?facebook\.com\/videos\/(\d+)/i.exec(s);
-    if (m) return { id: m[1], type: 'videos' };
-  
-    return null;
-  };
-  const isReel = (u) => /https?:\/\/www\.facebook\.com\/reel\/(\d+)/i.exec(u);
-  const isPhotoNew = (u) => /https?:\/\/www\.facebook\.com\/photo\/\?fbid=(\d+)/i.exec(u);
-  const isAlbumPhoto = (u) => /https?:\/\/www\.facebook\.com\/[^\/]+\/photos\/a\.[^\/]+\/(\d+)/i.exec(u);
-  const isStory = (u) => /https?:\/\/www\.facebook\.com\/story\.php\?([^#]+)/i.exec(u);
-  const isPermalink = (u) => /https?:\/\/www\.facebook\.com\/permalink\.php\?([^#]+)/i.exec(u);
-  const isEvent = (u) => /https?:\/\/www\.facebook\.com\/events\/(\d+)/i.exec(u);
+
   const isShare = (u) => /https?:\/\/www\.facebook\.com\/share\/[a-z]\/([A-Za-z0-9]+)/i.exec(u);
 
 
@@ -77,7 +110,7 @@ $(function () {
   function ensureFbSdk(contentBlockEl) {
     if (!window.fbAsyncInit) {
       window.fbAsyncInit = function () {
-        FB.init({ xfbml: true, version: 'v19.0' });
+        FB.init({xfbml: true, version: 'v19.0'});
       };
       if (!document.getElementById('facebook-jssdk')) {
         const js = document.createElement('script');
@@ -89,6 +122,20 @@ $(function () {
       if (typeof FB !== 'undefined' && FB.XFBML && FB.XFBML.parse) {
         FB.XFBML.parse(contentBlockEl);
       }
+    }
+  }
+
+  async function tryEmbedFbPost(href) {
+    const r = await fetch('/can-embed-fb?href=' + encodeURIComponent(href)).then(x=>x.json()).catch(()=>({ok:false}));
+    if (r.ok) {
+      // вставляємо fb-post
+      $link.after('<div class="fb-post" data-href="'+href+'" data-width="500" style="margin:10px 0"></div>');
+      ensureFbSdk(contentBlock[0]);
+    } else {
+      // fallback: OG‑картка
+      const og = await fetchOG(href);
+      const card = renderOGCard(og || { url: href });
+      $link.after(card);
     }
   }
 
@@ -109,13 +156,14 @@ $(function () {
         if ($link.data('fb-embedded')) return;
 
         // expand + normalize
-        let href = origHref;
+        let href = normFb(origHref);
 
-        if (isFbShort(href)) href = await expandFb(href);
-        href = normFb(href);
+        // if (isFbShort(href)) href = await expandFb(href);
+        // href = normFb(href);
 
         // Обробка /share/* → спершу розкручуємо через /resolve, тоді знову normFb
         const share = isShare(href);
+        // only share for now, if 'normal' links - leave it to the forum's processor
         if (share) {
           try {
             const expanded = await expandFb(href);
@@ -126,165 +174,337 @@ $(function () {
           } catch (e) {
             console.warn('[FacebookEmbed] share expand failed', e);
           }
-        }
 
-        let matched = false;
+          let matched = false;
 
-        // 1) posts
-        const postMatch = isPost(href);
-        if (postMatch) {
-          const page = postMatch[1];
-          const postId = postMatch[2];
-          const widgetId = 'facebook-post-' + page + '-' + postId;
-          if (contentBlock.find('#' + widgetId).length === 0) {
-            $link.after(
-              '<div id="' + widgetId + '" class="fb-post" ' +
-              'data-href="https://www.facebook.com/' + page + '/posts/' + postId + '" ' +
-              'data-width="500" ' +
-              'style="margin-top:10px;margin-bottom:10px;"></div>'
-            );
-            ensureFbSdk(contentBlock[0]);
-          }
-          $link.data('fb-embedded', true);
-          matched = true;
-        }
+//           // 1) videos (/videos/<id>, <user id>/videos/<id> OR /watch?v=<id>)
+//           const v = isVideo(href);
+//           if (v) {
+//             const widgetId = 'facebook-video-' + v.id;
+//             if (contentBlock.find('#' + widgetId).length === 0) {
+//               let dataHref;
+//               if (v.type === 'watch') {
+//                 dataHref = 'https://www.facebook.com/watch/?v=' + v.id;
+//               } else if (v.type === 'user') {
+//                 // user-case: будуємо URL на сторінці користувача/сторінки
+//                 dataHref = 'https://www.facebook.com/' + encodeURIComponent(v.user) + '/videos/' + v.id;
+//               } else {
+//                 // bare /videos/<id>
+//                 dataHref = 'https://www.facebook.com/videos/' + v.id;
+//               }
+//
+//               $link.after(
+//                 '<div id="' + widgetId + '" class="fb-video" ' +
+//                 'data-href="' + dataHref + '" ' +
+//                 'data-width="500" ' +
+//                 'style="margin-top:10px;margin-bottom:10px;"></div>'
+//               );
+//               ensureFbSdk(contentBlock[0]);
+//             }
+//             $link.data('fb-embedded', true);
+//             matched = true;
+//           }
+//
+// // 2) ⬇️ якщо це не відео — спробуй пост
+//           if (!matched) {
+//             const p = isFbPost(href);
+//             if (p) {
+//               const widgetId = 'facebook-post-' + p.id;
+//               if (contentBlock.find('#' + widgetId).length === 0) {
+//                 // для постів FB використовує <div class="fb-post" data-href="...">
+//                 $link.after(
+//                   '<div id="' + widgetId + '" class="fb-post" ' +
+//                   'data-href="' + p.href + '" data-width="500" ' +
+//                   'style="margin-top:10px;margin-bottom:10px;"></div>'
+//                 );
+//                 ensureFbSdk(contentBlock[0]);
+//               }
+//               $link.data('fb-embedded', true);
+//               matched = true;
+//             }
+//           }
+//
+//           // 3) старі posts
+//           if (!matched) {
+//             const postMatch = isPost(href);
+//             if (postMatch) {
+//               const page = postMatch[1];
+//               const postId = postMatch[2];
+//               const widgetId = 'facebook-post-' + page + '-' + postId;
+//               if (contentBlock.find('#' + widgetId).length === 0) {
+//                 $link.after(
+//                   '<div id="' + widgetId + '" class="fb-post" ' +
+//                   'data-href="https://www.facebook.com/' + page + '/posts/' + postId + '" ' +
+//                   'data-width="500" ' +
+//                   'style="margin-top:10px;margin-bottom:10px;"></div>'
+//                 );
+//                 ensureFbSdk(contentBlock[0]);
+//               }
+//               $link.data('fb-embedded', true);
+//               matched = true;
+//             }
+//           }
+//
+//           // 3) reels
+//           if (!matched) {
+//             const reelMatch = isReel(href);
+//             if (reelMatch) {
+//               const reelId = reelMatch[1];
+//               const widgetId = 'facebook-reel-' + reelId;
+//               if (contentBlock.find('#' + widgetId).length === 0) {
+//                 $link.after(
+//                   '<div id="' + widgetId + '" class="fb-video" ' +
+//                   'data-href="https://www.facebook.com/reel/' + reelId + '" ' +
+//                   'data-width="500" ' +
+//                   'style="margin-top:10px;margin-bottom:10px;"></div>'
+//                 );
+//                 ensureFbSdk(contentBlock[0]);
+//               }
+//               $link.data('fb-embedded', true);
+//               matched = true;
+//             }
+//           }
+//
+//           // 4) photo (new)
+//           if (!matched) {
+//             const phNew = isPhotoNew(href);
+//             if (phNew) {
+//               const fbid = phNew[1];
+//               const widgetId = 'facebook-photo-' + fbid;
+//               if (contentBlock.find('#' + widgetId).length === 0) {
+//                 $link.after(
+//                   '<div id="' + widgetId + '" class="fb-post" ' +
+//                   'data-href="' + href + '" ' +
+//                   'data-width="500" ' +
+//                   'style="margin-top:10px;margin-bottom:10px;"></div>'
+//                 );
+//                 ensureFbSdk(contentBlock[0]);
+//               }
+//               $link.data('fb-embedded', true);
+//               matched = true;
+//             }
+//           }
+//
+//           // 5) photo (album format)
+//           if (!matched) {
+//             const alb = isAlbumPhoto(href);
+//             if (alb) {
+//               const photoId = alb[1];
+//               const widgetId = 'facebook-album-photo-' + photoId;
+//               if (contentBlock.find('#' + widgetId).length === 0) {
+//                 $link.after(
+//                   '<div id="' + widgetId + '" class="fb-post" ' +
+//                   'data-href="' + href + '" ' +
+//                   'data-width="500" ' +
+//                   'style="margin-top:10px;margin-bottom:10px;"></div>'
+//                 );
+//                 ensureFbSdk(contentBlock[0]);
+//               }
+//               $link.data('fb-embedded', true);
+//               matched = true;
+//             }
+//           }
+//
+//           // 6) story.php / permalink.php → embed as post
+//           if (!matched) {
+//             const story = isStory(href) || isPermalink(href);
+//             if (story) {
+//               const widgetId = 'facebook-story-' + btoa(href).slice(0, 10);
+//               if (contentBlock.find('#' + widgetId).length === 0) {
+//                 $link.after(
+//                   '<div id="' + widgetId + '" class="fb-post" ' +
+//                   'data-href="' + href + '" ' +
+//                   'data-width="500" ' +
+//                   'style="margin-top:10px;margin-bottom:10px;"></div>'
+//                 );
+//                 ensureFbSdk(contentBlock[0]);
+//               }
+//               $link.data('fb-embedded', true);
+//               matched = true;
+//             }
+//           }
+//
+//           // 7) events → OG card via proxy (нема офіційного single-event embed)
+//           if (!matched) {
+//             const evt = isEvent(href);
+//             if (evt) {
+//               const widgetId = 'facebook-event-' + evt[1];
+//               if (contentBlock.find('#' + widgetId).length === 0) {
+//                 const og = await fetchOG(href);
+//                 const card = renderOGCard(og || {url: href, title: 'View event on Facebook'});
+//                 card.id = widgetId;
+//                 $link.after(card);
+//               }
+//               $link.data('fb-embedded', true);
+//               matched = true;
+//             }
+//           }
+//
+//           // 8) generic fallback
+//           if (!matched) {
+//             const widgetId = 'facebook-fallback-' + Math.random().toString(36).substr(2, 8);
+//             $link.after(
+//               '<div id="' + widgetId + '" style="margin-top:10px;padding:10px;border:1px solid #ccc;background:#f5f8fa;border-radius:6px;max-width:500px;">' +
+//               '<img src="https://static.xx.fbcdn.net/rsrc.php/yd/r/hlvibnBVrEb.svg" alt="Facebook" style="height:22px;vertical-align:middle;margin-right:10px;" />' +
+//               '<a href="' + href + '" target="_blank" style="font-weight:bold;color:#1877f2;text-decoration:none;">' +
+//               'View on Facebook</a></div>'
+//             );
+//             $link.data('fb-embedded', true);
+//           }
 
-        // 2) videos (/videos/<id>, <user id>/videos/<id> OR /watch?v=<id>)
-        if (!matched) {
-          const v = isVideo(href);
-          if (v) {
-            const widgetId = 'facebook-video-' + v.id;
-            if (contentBlock.find('#' + widgetId).length === 0) {
-              let dataHref;
-              if (v.type === 'watch') {
-                dataHref = 'https://www.facebook.com/watch/?v=' + v.id;
-              } else if (v.type === 'user') {
-                // user-case: будуємо URL на сторінці користувача/сторінки
-                dataHref = 'https://www.facebook.com/' + encodeURIComponent(v.user) + '/videos/' + v.id;
-              } else {
-                // bare /videos/<id>
-                dataHref = 'https://www.facebook.com/videos/' + v.id;
+
+////////////////////////// нове /////////////////////////
+          if (!matched) {
+            const v = isVideo(href);
+            if (v) {
+              const widgetId = 'facebook-video-' + v.id;
+              if (contentBlock.find('#' + widgetId).length === 0) {
+                let dataHref;
+                if (v.type === 'watch') {
+                  dataHref = 'https://www.facebook.com/watch/?v=' + v.id;
+                } else if (v.type === 'user') {
+                  dataHref = 'https://www.facebook.com/' + encodeURIComponent(v.user) + '/videos/' + v.id;
+                } else {
+                  dataHref = 'https://www.facebook.com/videos/' + v.id;
+                }
+                $link.after(
+                  '<div id="' + widgetId + '" class="fb-video" ' +
+                  'data-href="' + dataHref + '" data-width="500" ' +
+                  'style="margin-top:10px;margin-bottom:10px;"></div>'
+                );
+                ensureFbSdk(contentBlock[0]);
               }
+              $link.data('fb-embedded', true);
+              matched = true;
+            }
+          }
 
+          if (!matched) {
+            const reel = isReel(href);
+            if (reel) {
+              const reelId = reel[1];
+              const widgetId = 'facebook-reel-' + reelId;
+              if (contentBlock.find('#' + widgetId).length === 0) {
+                $link.after(
+                  '<div id="' + widgetId + '" class="fb-video" ' +
+                  'data-href="https://www.facebook.com/reel/' + reelId + '" ' +
+                  'data-width="500" ' +
+                  'style="margin-top:10px;margin-bottom:10px;"></div>'
+                );
+                ensureFbSdk(contentBlock[0]);
+              }
+              $link.data('fb-embedded', true);
+              matched = true;
+            }
+          }
+
+          if (!matched) {
+            const p = isFbPost(href);
+            if (p) {
+              const widgetId = 'facebook-post-' + p.id;
+              // before using href in data-href
+              const cleanHref = p.href
+                .replace(/(\?|&)rdid=[^&#]*/gi, '')
+                .replace(/(\?|&)share_url=[^&#]*/gi, '')
+                .replace(/(\?|&)m=1\b/gi, '')
+                .replace(/[#?]&?$/,''); // зайві хвости
+
+              if (contentBlock.find('#' + widgetId).length === 0) {
+                $link.after(
+                  '<div id="' + widgetId + '" class="fb-post" ' +
+                  'data-href="' + cleanHref + '" data-width="500" ' +
+                  'style="margin-top:10px;margin-bottom:10px;"></div>'
+                );
+                ensureFbSdk(contentBlock[0]);
+              }
+              $link.data('fb-embedded', true);
+              matched = true;
+            }
+          }
+
+          // «класичні» фото — вбудовуємо як fb-post із оригінальним href
+          if (!matched) {
+            const phNew = isPhotoNew(href);
+            if (phNew) {
+              const fbid = phNew[1];
+              const widgetId = 'facebook-photo-' + fbid;
+              if (contentBlock.find('#' + widgetId).length === 0) {
+                $link.after(
+                  '<div id="' + widgetId + '" class="fb-post" ' +
+                  'data-href="' + href + '" data-width="500" ' +
+                  'style="margin-top:10px;margin-bottom:10px;"></div>'
+                );
+                ensureFbSdk(contentBlock[0]);
+              }
+              $link.data('fb-embedded', true);
+              matched = true;
+            }
+          }
+
+          if (!matched) {
+            const alb = isAlbumPhoto(href);
+            if (alb) {
+              const photoId = alb[1];
+              const widgetId = 'facebook-album-photo-' + photoId;
+              if (contentBlock.find('#' + widgetId).length === 0) {
+                $link.after(
+                  '<div id="' + widgetId + '" class="fb-post" ' +
+                  'data-href="' + href + '" data-width="500" ' +
+                  'style="margin-top:10px;margin-bottom:10px;"></div>'
+                );
+                ensureFbSdk(contentBlock[0]);
+              }
+              $link.data('fb-embedded', true);
+              matched = true;
+            }
+          }
+
+          // story.php / permalink.php → embed as post
+          if (!matched) {
+            if (isStory(href) || isPermalink(href)) {
+              const widgetId = 'facebook-story-' + btoa(href).slice(0, 10);
+              if (contentBlock.find('#' + widgetId).length === 0) {
+                $link.after(
+                  '<div id="' + widgetId + '" class="fb-post" ' +
+                  'data-href="' + href + '" data-width="500" ' +
+                  'style="margin-top:10px;margin-bottom:10px;"></div>'
+                );
+                ensureFbSdk(contentBlock[0]);
+              }
+              $link.data('fb-embedded', true);
+              matched = true;
+            }
+          }
+
+          // events → нема офіційного single-event embed → малюємо OG‑картку
+          if (!matched) {
+            const evt = isEvent(href);
+            if (evt) {
+              const widgetId = 'facebook-event-' + evt[1];
+              if (contentBlock.find('#' + widgetId).length === 0) {
+                const og = await fetchOG(href);
+                const card = renderOGCard(og || {url: href, title: 'View event on Facebook'});
+                card.id = widgetId;
+                $link.after(card);
+              }
+              $link.data('fb-embedded', true);
+              matched = true;
+            }
+
+            // generic fallback
+            if (!matched) {
+              const widgetId = 'facebook-fallback-' + Math.random().toString(36).substr(2, 8);
               $link.after(
-                '<div id="' + widgetId + '" class="fb-video" ' +
-                'data-href="' + dataHref + '" ' +
-                'data-width="500" ' +
-                'style="margin-top:10px;margin-bottom:10px;"></div>'
+                '<div id="' + widgetId + '" style="margin-top:10px;padding:10px;border:1px solid #ccc;background:#f5f8fa;border-radius:6px;max-width:500px;">' +
+                '<img src="https://static.xx.fbcdn.net/rsrc.php/yd/r/hlvibnBVrEb.svg" alt="Facebook" style="height:22px;vertical-align:middle;margin-right:10px;" />' +
+                '<a href="' + href + '" target="_blank" style="font-weight:bold;color:#1877f2;text-decoration:none;">' +
+                'Could not expand this link, please view it on Facebook</a></div>'
               );
-              ensureFbSdk(contentBlock[0]);
+              $link.data('fb-embedded', true);
             }
-            $link.data('fb-embedded', true);
-            matched = true;
           }
-        }
-
-        // 3) reels
-        if (!matched) {
-          const reelMatch = isReel(href);
-          if (reelMatch) {
-            const reelId = reelMatch[1];
-            const widgetId = 'facebook-reel-' + reelId;
-            if (contentBlock.find('#' + widgetId).length === 0) {
-              $link.after(
-                '<div id="' + widgetId + '" class="fb-video" ' +
-                'data-href="https://www.facebook.com/reel/' + reelId + '" ' +
-                'data-width="500" ' +
-                'style="margin-top:10px;margin-bottom:10px;"></div>'
-              );
-              ensureFbSdk(contentBlock[0]);
-            }
-            $link.data('fb-embedded', true);
-            matched = true;
-          }
-        }
-
-        // 4) photo (new)
-        if (!matched) {
-          const phNew = isPhotoNew(href);
-          if (phNew) {
-            const fbid = phNew[1];
-            const widgetId = 'facebook-photo-' + fbid;
-            if (contentBlock.find('#' + widgetId).length === 0) {
-              $link.after(
-                '<div id="' + widgetId + '" class="fb-post" ' +
-                'data-href="' + href + '" ' +
-                'data-width="500" ' +
-                'style="margin-top:10px;margin-bottom:10px;"></div>'
-              );
-              ensureFbSdk(contentBlock[0]);
-            }
-            $link.data('fb-embedded', true);
-            matched = true;
-          }
-        }
-
-        // 5) photo (album format)
-        if (!matched) {
-          const alb = isAlbumPhoto(href);
-          if (alb) {
-            const photoId = alb[1];
-            const widgetId = 'facebook-album-photo-' + photoId;
-            if (contentBlock.find('#' + widgetId).length === 0) {
-              $link.after(
-                '<div id="' + widgetId + '" class="fb-post" ' +
-                'data-href="' + href + '" ' +
-                'data-width="500" ' +
-                'style="margin-top:10px;margin-bottom:10px;"></div>'
-              );
-              ensureFbSdk(contentBlock[0]);
-            }
-            $link.data('fb-embedded', true);
-            matched = true;
-          }
-        }
-
-        // 6) story.php / permalink.php → embed as post
-        if (!matched) {
-          const story = isStory(href) || isPermalink(href);
-          if (story) {
-            const widgetId = 'facebook-story-' + btoa(href).slice(0, 10);
-            if (contentBlock.find('#' + widgetId).length === 0) {
-              $link.after(
-                '<div id="' + widgetId + '" class="fb-post" ' +
-                'data-href="' + href + '" ' +
-                'data-width="500" ' +
-                'style="margin-top:10px;margin-bottom:10px;"></div>'
-              );
-              ensureFbSdk(contentBlock[0]);
-            }
-            $link.data('fb-embedded', true);
-            matched = true;
-          }
-        }
-
-        // 7) events → OG card via proxy (нема офіційного single-event embed)
-        if (!matched) {
-          const evt = isEvent(href);
-          if (evt) {
-            const widgetId = 'facebook-event-' + evt[1];
-            if (contentBlock.find('#' + widgetId).length === 0) {
-              const og = await fetchOG(href);
-              const card = renderOGCard(og || { url: href, title: 'View event on Facebook' });
-              card.id = widgetId;
-              $link.after(card);
-            }
-            $link.data('fb-embedded', true);
-            matched = true;
-          }
-        }
-
-        // 8) generic fallback
-        if (!matched) {
-          const widgetId = 'facebook-fallback-' + Math.random().toString(36).substr(2, 8);
-          $link.after(
-            '<div id="' + widgetId + '" style="margin-top:10px;padding:10px;border:1px solid #ccc;background:#f5f8fa;border-radius:6px;max-width:500px;">' +
-            '<img src="https://static.xx.fbcdn.net/rsrc.php/yd/r/hlvibnBVrEb.svg" alt="Facebook" style="height:22px;vertical-align:middle;margin-right:10px;" />' +
-            '<a href="' + href + '" target="_blank" style="font-weight:bold;color:#1877f2;text-decoration:none;">' +
-            'View on Facebook</a></div>'
-          );
-          $link.data('fb-embedded', true);
-        }
+////////////////////////// кінець нового ////////////////
+        } // only share, if 'normal' links - leave it to the forum's processor
       })();
     });
   });
