@@ -711,7 +711,7 @@ async function probeFbPlugin(src, { referer, timeoutMs = 9000, log = console } =
   const res = await fetch(src, { method: 'GET', headers, redirect: 'follow', signal: ctrl });
   const text = await res.text().catch(() => '');
   log.info?.('[StealthProxy] can-embed-fb: status', res.status, 'len', text.length);
-  log.info?.('[StealthProxy] can-embed-fb: text', text);
+  //log.info?.('[StealthProxy] can-embed-fb: text', text);
 
   if (!text) return { ok: false, status: res.status || 0, reason: 'empty' };
   // if (/This Facebook post is no longer available/i.test(text)) {
@@ -735,7 +735,7 @@ app.get('/can-embed-fb', async (req, res) => {
 
     // пробуємо www → m
     const srcWWW = buildPluginSrc('www.facebook.com', cleanHref);
-    let r = await probeFbPlugin(srcWWW, { referer: 'www.facebook.com', log: console });
+    let r = await probeFbPlugin(srcWWW, { referer, log: console });
     if (r.ok) {
       return res.json({
         ok: true,
@@ -748,7 +748,7 @@ app.get('/can-embed-fb', async (req, res) => {
     }
 
     const srcM = buildPluginSrc('m.facebook.com', cleanHref);
-    r = await probeFbPlugin(srcM, { referer: 'm.facebook.com', log: console });
+    r = await probeFbPlugin(srcM, { referer, log: console });
     if (r.ok) {
       return res.json({
         ok: true,

@@ -6,6 +6,33 @@ $(function () {
   const OG_API = PROXY + '/og-proxy?url=';
   const CAN_EMB_API = PROXY + '/can-embed-fb?href=';
 
+  // Чи це jQuery-об'єкт?
+  function isJQ(x){ return !!(x && (x.jquery || (window.jQuery && x instanceof window.jQuery))); }
+// Витягнути DOM-ноду з jQuery або повернути як є
+  function toNode(x){ return isJQ(x) ? x[0] : x; }
+// Створити ноду з HTML-рядка
+  function htmlToNode(html){
+    const t = document.createElement('template');
+    t.innerHTML = html.trim();
+    return t.content.firstChild;
+  }
+// Перевірити, чи елемент з id вже існує всередині contentBlock (jQ або DOM)
+  function hasInBlock(contentBlock, id){
+    const root = isJQ(contentBlock) ? contentBlock[0] : (contentBlock || document);
+    return !!root.querySelector('#' + id);
+  }
+// Вставити ПІСЛЯ посилання (працює і з jQ, і без)
+  function insertAfterLink(link, htmlOrNode){
+    const el = (typeof htmlOrNode === 'string') ? htmlToNode(htmlOrNode) : htmlOrNode;
+    if (isJQ(link)) { link.after(el); return el; }
+    const node = toNode(link);
+    if (node && node.parentNode){
+      if (node.insertAdjacentElement) node.insertAdjacentElement('afterend', el);
+      else node.parentNode.insertBefore(el, node.nextSibling);
+    }
+    return el;
+  }
+
 // ====== DETECTORS ======
   const isVideo = (u) => {
     const s = String(u || '');
@@ -139,29 +166,60 @@ $(function () {
   //     $link.after(card);
   //   }
   // }
+  // async function tryEmbedFbPost(href, $link, contentBlock) {
+  //   const url = CAN_EMB_API + encodeURIComponent(href) + '&origin=' + encodeURIComponent(location.origin);
+  //   const r = await fetch(url).then(x => x.json()).catch(() => ({ ok: false }));
+  //
+  //   if (r.ok && r.src) {
+  //     const widgetId = 'facebook-post-iframe-' + btoa(r.cleanHref || href).slice(0, 10);
+  //     if (contentBlock.find('#' + widgetId).length === 0 || 1) {
+  //       const $wrap = $('<div/>', { id: widgetId, class: 'fb-post-iframe', css: { margin: '10px 0' } });
+  //       $wrap.html(0 || (
+  //         '<iframe src="' + r.text + '" width="500" height="680" style="border:none;overflow:hidden" ' +
+  //         'scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>'
+  //       ));
+  //       $link.after($wrap);
+  //     }
+  //     $link.data('fb-embedded', true);
+  //     return true;
+  //   }
+  //
+  //   // fallback → OG‑картка
+  //   const og = await fetchOG(r.cleanHref || href);
+  //   const card = renderOGCard(og || { url: href });
+  //   $link.after(card);
+  //   $link.data('fb-embedded', true);
+  //   return false;
+  // }
+
   async function tryEmbedFbPost(href, $link, contentBlock) {
     const url = CAN_EMB_API + encodeURIComponent(href) + '&origin=' + encodeURIComponent(location.origin);
-    const r = await fetch(url).then(x => x.json()).catch(() => ({ ok: false }));
+    const r = await fetch(url).then(x => x.json()).catch(() => ({ ok:false }));
 
     if (r.ok && r.src) {
-      const widgetId = 'facebook-post-iframe-' + btoa(r.cleanHref || href).slice(0, 10);
-      if (contentBlock.find('#' + widgetId).length === 0) {
-        const $wrap = $('<div/>', { id: widgetId, class: 'fb-post-iframe', css: { margin: '10px 0' } });
-        $wrap.html(r.html || (
-          '<iframe src="' + r.src + '" width="500" height="680" style="border:none;overflow:hidden" ' +
-          'scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>'
-        ));
-        $link.after($wrap);
+      const clean = r.cleanHref || href;
+      const widgetId = 'facebook-post-iframe-' + btoa(clean).slice(0,10);
+
+      if (!hasInBlock(contentBlock, widgetId)) {
+        const html = r.html || (
+          '<div id="'+widgetId+'" class="fb-post-iframe" style="margin:10px 0">' +
+          '<iframe src="'+r.src+'" width="500" height="680" style="border:none;overflow:hidden" ' +
+          'scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>' +
+          '</div>'
+        );
+        insertAfterLink($link, html);
       }
-      $link.data('fb-embedded', true);
+      // помітити, що вже оброблено (і для jQ, і без)
+      if (isJQ($link)) { $link.data('fb-embedded', true); } else { $link.dataset.fbEmbedded = '1'; }
       return true;
     }
 
     // fallback → OG‑картка
-    const og = await fetchOG(r.cleanHref || href);
+    const og = await fetchOG(href);
     const card = renderOGCard(og || { url: href });
-    $link.after(card);
-    $link.data('fb-embedded', true);
+    // card може бути DOM-нода або HTML-string — обидва варіанти працюють
+    insertAfterLink($link, card);
+    if (isJQ($link)) { $link.data('fb-embedded', true); } else { $link.dataset.fbEmbedded = '1'; }
     return false;
   }
 
