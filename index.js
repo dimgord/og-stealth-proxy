@@ -638,6 +638,7 @@ app.get('/resolve', async (req, res) => {
 async function canEmbedFbPost(href, timeoutMs = 8000) {
   const ctrl = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
   const url = 'https://www.facebook.com/plugins/post.php?omitscript=true&href=' + encodeURIComponent(href);
+  console.log("[StealthProxy] can-embed-fb: url: ", url);
   const res = await fetch(url, {
     method: 'GET',
     redirect: 'follow',
@@ -648,14 +649,17 @@ async function canEmbedFbPost(href, timeoutMs = 8000) {
     },
     signal: ctrl,
   });
+  console.log("[StealthProxy] can-embed-fb: res: ", res);
   if (!res.ok) return false;
   const html = await res.text();
+  console.log("[StealthProxy] can-embed-fb: html: ", html);
   return !/This Facebook post is no longer available/i.test(html);
 }
 
 app.get('/can-embed-fb', async (req, res) => {
   try {
     const href = normalizeUrl(String(req.query.href || ''));
+    console.log("[StealthProxy] can-embed-fb: input: ", href);
     if (!href) return res.status(400).json({ ok: false });
     const ok = await canEmbedFbPost(href);
     res.json({ ok });
