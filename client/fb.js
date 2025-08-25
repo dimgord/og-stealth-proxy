@@ -140,7 +140,7 @@ $(function () {
   //   }
   // }
   async function tryEmbedFbPost(href, $link, contentBlock) {
-    const url = OG_API + '/can-embed-fb?href=' + encodeURIComponent(href) + '&origin=' + encodeURIComponent(location.origin);
+    const url = CAN_EMB_API + encodeURIComponent(href) + '&origin=' + encodeURIComponent(location.origin);
     const r = await fetch(url).then(x => x.json()).catch(() => ({ ok: false }));
 
     if (r.ok && r.src) {
@@ -442,7 +442,7 @@ $(function () {
               //   );
               //   ensureFbSdk(contentBlock[0]);
               // }
-              $link.data('fb-embedded', true);
+              // $link.data('fb-embedded', true);
               matched = true;
             }
           }

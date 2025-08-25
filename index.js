@@ -734,7 +734,7 @@ app.get('/can-embed-fb', async (req, res) => {
 
     // пробуємо www → m
     const srcWWW = buildPluginSrc('www.facebook.com', cleanHref);
-    let r = await probeFbPlugin(srcWWW, { referer, log: console });
+    let r = await probeFbPlugin(srcWWW, { referer: 'www.facebook.com', log: console });
     if (r.ok) {
       return res.json({
         ok: true,
@@ -747,7 +747,7 @@ app.get('/can-embed-fb', async (req, res) => {
     }
 
     const srcM = buildPluginSrc('m.facebook.com', cleanHref);
-    r = await probeFbPlugin(srcM, { referer, log: console });
+    r = await probeFbPlugin(srcM, { referer: 'm.facebook.com', log: console });
     if (r.ok) {
       return res.json({
         ok: true,
