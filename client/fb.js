@@ -4,6 +4,7 @@ $(function () {
   const PROXY = 'https://www.dimgord.cc';
   const RESOLVE_API = PROXY + '/resolve?url=';
   const OG_API = PROXY + '/og-proxy?url=';
+  const CAN_EMB_API = PROXY + '/can-embed-fb?href=';
 
 // ====== DETECTORS ======
   const isVideo = (u) => {
@@ -126,7 +127,7 @@ $(function () {
   }
 
   async function tryEmbedFbPost(href) {
-    const r = await fetch('/can-embed-fb?href=' + encodeURIComponent(href)).then(x=>x.json()).catch(()=>({ok:false}));
+    const r = await fetch(CAN_EMB_API + encodeURIComponent(href)).then(x=>x.json()).catch(()=>({ok:false}));
     if (r.ok) {
       // вставляємо fb-post
       $link.after('<div class="fb-post" data-href="'+href+'" data-width="500" style="margin:10px 0"></div>');
@@ -401,22 +402,21 @@ $(function () {
           if (!matched) {
             const p = isFbPost(href);
             if (p) {
-              const widgetId = 'facebook-post-' + p.id;
               // before using href in data-href
               const cleanHref = p.href
                 .replace(/(\?|&)rdid=[^&#]*/gi, '')
                 .replace(/(\?|&)share_url=[^&#]*/gi, '')
                 .replace(/(\?|&)m=1\b/gi, '')
                 .replace(/[#?]&?$/,''); // зайві хвости
-
-              if (contentBlock.find('#' + widgetId).length === 0) {
-                $link.after(
-                  '<div id="' + widgetId + '" class="fb-post" ' +
-                  'data-href="' + cleanHref + '" data-width="500" ' +
-                  'style="margin-top:10px;margin-bottom:10px;"></div>'
-                );
-                ensureFbSdk(contentBlock[0]);
-              }
+              tryEmbedFbPost(cleanHref);
+              // if (contentBlock.find('#' + widgetId).length === 0) {
+              //   $link.after(
+              //     '<div id="' + widgetId + '" class="fb-post" ' +
+              //     'data-href="' + cleanHref + '" data-width="500" ' +
+              //     'style="margin-top:10px;margin-bottom:10px;"></div>'
+              //   );
+              //   ensureFbSdk(contentBlock[0]);
+              // }
               $link.data('fb-embedded', true);
               matched = true;
             }
