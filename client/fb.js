@@ -11,11 +11,21 @@ $(function () {
 
   const isPost = (u) => /https?:\/\/www\.facebook\.com\/([^\/?]+)\/posts\/(\d+)/i.exec(u);
   const isVideo = (u) => {
-    // /<page>/videos/<id>  OR  /watch/?v=<id>
+    // https://www.facebook.com/videos/12345
     const a = /https?:\/\/www\.facebook\.com\/(?:[^\/?]+\/)?videos\/(\d+)/i.exec(u);
-    if (a) return { id: a[1], type: 'videos' };
+    if (a)
+      return { id: a[1], type: 'videos' };
+  
+    // https://www.facebook.com/watch?v=12345
     const b = /https?:\/\/www\.facebook\.com\/watch\/?\?v=(\d+)/i.exec(u);
-    if (b) return { id: b[1], type: 'watch' };
+    if (b)
+      return { id: b[1], type: 'watch' };
+  
+    // https://www.facebook.com/<user>/videos/<slug>/<id>/
+    const c = /https?:\/\/www\.facebook\.com\/[^\/?]+\/videos\/[^\/?]+\/(\d+)/i.exec(u);
+    if (c)
+      return { id: c[1], type: 'videos' };
+  
     return null;
   };
   const isReel = (u) => /https?:\/\/www\.facebook\.com\/reel\/(\d+)/i.exec(u);
