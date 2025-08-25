@@ -3,8 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import cors from 'cors';
-
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import express from 'express';
@@ -384,7 +382,30 @@ let _browser = null;
 let consecutiveFailures = 0;
 const MAX_FAILURES = 5;
 
-app.use(cors({ origin: '*', methods: ['GET'], maxAge: 86400 }));
+// CORS — єдине місце, де ми його ставимо
+const ALLOWED_ORIGINS = new Set([
+  'https://2021-itmtank.forumgamers.net',
+  // додай інші домени, якщо треба
+]);
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    // якщо хочеш дозволяти всім — лиши '*', але ТІЛЬКИ одне значення
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('Vary', 'Origin'); // щоб кеші правильно працювали
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
 
 app.get('/', (_, res) => {
   res.send('👋 Stealth Puppeteer OG Proxy is running!');
