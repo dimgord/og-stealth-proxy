@@ -596,52 +596,6 @@ app.get('/resolve', async (req, res) => {
             }
           }
         }
-/*
-        // 3c) [FB share] немає 3xx → тягнемо HTML і шукаємо canonical/og/url/refresh/евристики
-        if (isFbShare) {
-          // 3d) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
-          try {
-            console.info('[StealthProxy][resolve] fallback to OG canonical…');
-            const og = await getOgCanonical(candidate, { useBrowser: true, log: console });
-            if (og && og.url) {
-              const finalUrl = normalizeUrl(og.url);
-              if (finalUrl && finalUrl !== candidate) {
-                return res.json({ finalUrl, method: 'og-canonical' });
-              }
-            }
-          } catch (e) {
-            console.warn('[StealthProxy][resolve] og-canonical failed:', e.message || String(e));
-          }
-          console.info('[StealthProxy][resolve] share: try HTML canonical');
-          let canon = null;
-          // спроба 1: www + _fb_noscript=1
-          const uNoScript = new URL(candidate); uNoScript.searchParams.set('_fb_noscript', '1');
-          let r = await fetchHtml(uNoScript.toString(), 10000);
-          canon = pickCanonicalFromHtml(r.html, r.url);
-          // спроба 2: www без noscript
-          if (!canon || canon === candidate) {
-            r = await fetchHtml(candidate, 9000);
-            canon = pickCanonicalFromHtml(r.html, r.url) || canon;
-          }
-          // спроба 3: m.facebook.com
-          if (!canon || canon === candidate) {
-            const mURL = new URL(candidate); mURL.hostname = 'm.facebook.com';
-            r = await fetchHtml(mURL.toString(), 9000);
-            canon = pickCanonicalFromHtml(r.html, r.url) || canon;
-          }
-          // спроба 4: mbasic.facebook.com
-          if (!canon || canon === candidate) {
-            const bURL = new URL(candidate); bURL.hostname = 'mbasic.facebook.com';
-            r = await fetchHtml(bURL.toString(), 9000);
-            canon = pickCanonicalFromHtml(r.html, r.url) || canon;
-          }
-          if (canon && canon !== candidate) {
-            const finalUrl = normalizeUrl(canon);
-            console.info('[StealthProxy][resolve] html-canonical →', finalUrl);
-            return res.json({ finalUrl, method: 'html-canonical' });
-          }
-        }
-*/
         // якщо нічого не вийшло — віддаємо нормалізоване як є
         return res.json({ finalUrl: candidate, warning: 'network-resolve-nochange' });
       } catch (e) {
@@ -660,93 +614,156 @@ app.get('/resolve', async (req, res) => {
   }
 });
 
-async function canEmbedFbPost(href, timeoutMs = 9000) {
-  const clean = normalizeUrl(String(href || ''));
-  const baseParams = new URLSearchParams({
-    omitscript: 'true',
-    href: clean,
-    locale: 'en_US',
-    show_text: 'true',
-    width: '500',
-  });
+// async function canEmbedFbPost(href, timeoutMs = 9000) {
+//   const clean = normalizeUrl(String(href || ''));
+//   const baseParams = new URLSearchParams({
+//     omitscript: 'true',
+//     href: clean,
+//     locale: 'en_US',
+//     show_text: 'true',
+//     width: '500',
+//   });
+//
+//   const headers = {
+//     'user-agent': DEFAULT_UA,                              // 🔧 desktop UA
+//     'accept-language': DEFAULT_LANG,
+//     'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+//     'upgrade-insecure-requests': '1',
+//     'referer': 'https://www.facebook.com/',                // 🔧 важливо
+//     'sec-fetch-site': 'none',
+//     'sec-fetch-mode': 'navigate',
+//     'sec-fetch-user': '?1',
+//     'sec-fetch-dest': 'document',
+//   };
+//
+//   const ctrl = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
+//
+//   // helper
+//   const tryOnce = async (host) => {
+//     const url = `https://${host}/plugins/post.php?` + baseParams.toString();
+//     console.log('[StealthProxy] can-embed-fb: url: ', url);
+//     const res = await fetch(url, { method: 'GET', headers, redirect: 'follow', signal: ctrl });
+//     const text = await res.text().catch(() => '');
+//     console.log('[StealthProxy] can-embed-fb: status:', res.status, 'len:', text.length);
+//     if (!text) return false;
+//
+//     // якщо FB віддає плашку «no longer available» — це явно false
+//     if (/This Facebook post is no longer available/i.test(text)) return false;
+//
+//     // якщо сторінка нормально зібралась (doctype/html або всередині є fb_embed контент) — вважаємо, що можна
+//     if (res.ok && /<html|<iframe|class="[^"]*fb_post|data-testid="post_message"/i.test(text)) return true;
+//
+//     // буває 400, але всередині є робочий html (рідко) — спробуй розпізнати
+//     if (!res.ok && /<html|<iframe/i.test(text)) return true;
+//
+//     return false;
+//   };
+//
+//   // 1) звичайний www
+//   let ok = await tryOnce('www.facebook.com');
+//   if (ok) return true;
+//
+//   // 2) mobile fallback — інколи ріже 400 на www, але не на m.
+//   ok = await tryOnce('m.facebook.com');
+//   return !!ok;
+// }
+//
+// // маршрут (не забудь CORS на рівні app)
+// app.get('/can-embed-fb', async (req, res) => {
+//   try {
+//     const href = normalizeUrl(String(req.query.href || ''));
+//     if (!href) return res.status(400).json({ ok: false });
+//     const ok = await canEmbedFbPost(href);
+//     res.json({ ok });
+//   } catch (e) {
+//     console.warn('[StealthProxy] can-embed-fb error:', e?.message || e);
+//     res.json({ ok: false });
+//   }
+// });
 
+function buildPluginSrc(host, cleanHref) {
+  const qs = new URLSearchParams({
+    omitscript: 'true',
+    href: cleanHref,
+    show_text: 'true',
+    locale: 'en_US',
+    width: '500',
+    // можеш додати: 'ref': 'ogproxy'
+  });
+  return `https://${host}/plugins/post.php?` + qs.toString();
+}
+
+async function probeFbPlugin(src, { referer, timeoutMs = 9000, log = console } = {}) {
   const headers = {
-    'user-agent': DEFAULT_UA,                              // 🔧 desktop UA
+    'user-agent': DEFAULT_UA,
     'accept-language': DEFAULT_LANG,
     'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'upgrade-insecure-requests': '1',
-    'referer': 'https://www.facebook.com/',                // 🔧 важливо
+    // ⚠️ ключовий момент — емулюємо реальний referer клієнта
+    ...(referer ? { referer } : {}),
     'sec-fetch-site': 'none',
     'sec-fetch-mode': 'navigate',
     'sec-fetch-user': '?1',
     'sec-fetch-dest': 'document',
   };
-
   const ctrl = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
 
-  // helper
-  const tryOnce = async (host) => {
-    const url = `https://${host}/plugins/post.php?` + baseParams.toString();
-    console.log('[StealthProxy] can-embed-fb: url: ', url);
-    const res = await fetch(url, { method: 'GET', headers, redirect: 'follow', signal: ctrl });
-    const text = await res.text().catch(() => '');
-    console.log('[StealthProxy] can-embed-fb: status:', res.status, 'len:', text.length);
-    if (!text) return false;
+  const res = await fetch(src, { method: 'GET', headers, redirect: 'follow', signal: ctrl });
+  const text = await res.text().catch(() => '');
+  log.info?.('[StealthProxy] can-embed-fb: status', res.status, 'len', text.length);
 
-    // якщо FB віддає плашку «no longer available» — це явно false
-    if (/This Facebook post is no longer available/i.test(text)) return false;
-
-    // якщо сторінка нормально зібралась (doctype/html або всередині є fb_embed контент) — вважаємо, що можна
-    if (res.ok && /<html|<iframe|class="[^"]*fb_post|data-testid="post_message"/i.test(text)) return true;
-
-    // буває 400, але всередині є робочий html (рідко) — спробуй розпізнати
-    if (!res.ok && /<html|<iframe/i.test(text)) return true;
-
-    return false;
-  };
-
-  // 1) звичайний www
-  let ok = await tryOnce('www.facebook.com');
-  if (ok) return true;
-
-  // 2) mobile fallback — інколи ріже 400 на www, але не на m.
-  ok = await tryOnce('m.facebook.com');
-  return !!ok;
+  if (!text) return { ok: false, status: res.status || 0, reason: 'empty' };
+  if (/This Facebook post is no longer available/i.test(text)) {
+    return { ok: false, status: res.status || 200, reason: 'not-available' };
+  }
+  // груба евристика «виглядає як робочий плагін»
+  const looksOk = /<html|<iframe|class="[^"]*fb_post|data-testid="post_message"/i.test(text);
+  return { ok: looksOk && res.ok, status: res.status || 0, reason: looksOk ? 'ok' : 'unknown' };
 }
 
-// маршрут (не забудь CORS на рівні app)
 app.get('/can-embed-fb', async (req, res) => {
   try {
-    const href = normalizeUrl(String(req.query.href || ''));
-    if (!href) return res.status(400).json({ ok: false });
-    const ok = await canEmbedFbPost(href);
-    res.json({ ok });
+    const rawHref = String(req.query.href || '');
+    if (!rawHref) return res.json({ ok: false, reason: 'no-href' });
+
+    const cleanHref = normalizeUrl(rawHref);
+
+    // емулюємо КЛІЄНТСЬКЕ походження
+    const clientOrigin = req.headers.origin || req.query.origin || '';
+    const referer = clientOrigin || 'https://www.dimgord.cc/'; // запасний
+
+    // пробуємо www → m
+    const srcWWW = buildPluginSrc('www.facebook.com', cleanHref);
+    let r = await probeFbPlugin(srcWWW, { referer, log: console });
+    if (r.ok) {
+      return res.json({
+        ok: true,
+        host: 'www.facebook.com',
+        cleanHref,
+        src: srcWWW,
+        // даю ще готовий HTML-фрагмент (на випадок, якщо хочеш просто вставити рядок)
+        html: `<iframe src="${srcWWW}" width="500" height="680" style="border:none;overflow:hidden" scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>`
+      });
+    }
+
+    const srcM = buildPluginSrc('m.facebook.com', cleanHref);
+    r = await probeFbPlugin(srcM, { referer, log: console });
+    if (r.ok) {
+      return res.json({
+        ok: true,
+        host: 'm.facebook.com',
+        cleanHref,
+        src: srcM,
+        html: `<iframe src="${srcM}" width="500" height="680" style="border:none;overflow:hidden" scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>`
+      });
+    }
+
+    return res.json({ ok: false, cleanHref, reason: r.reason || 'probe-failed' });
   } catch (e) {
     console.warn('[StealthProxy] can-embed-fb error:', e?.message || e);
-    res.json({ ok: false });
+    res.json({ ok: false, reason: 'exception' });
   }
 });
-
-// async function canEmbedFbPost(href, timeoutMs = 8000) {
-//   const ctrl = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
-//   const url = 'https://www.facebook.com/plugins/post.php?omitscript=true&href=' + encodeURIComponent(href);
-//   console.log("[StealthProxy] can-embed-fb: url: ", url);
-//   const res = await fetch(url, {
-//     method: 'GET',
-//     redirect: 'follow',
-//     headers: {
-//       'user-agent': DEFAULT_UA_MOBILE,
-//       'accept-language': 'en-US,en;q=0.9,uk-UA;q=0.8',
-//       'accept': 'text/html,*/*;q=0.8',
-//     },
-//     signal: ctrl,
-//   });
-//   console.log("[StealthProxy] can-embed-fb: res: ", res);
-//   if (!res.ok) return false;
-//   const html = await res.text();
-//   console.log("[StealthProxy] can-embed-fb: html: ", html);
-//   return !/This Facebook post is no longer available/i.test(html);
-// }
 
 async function safeCloseBrowser() {
   try { if (_browser) { await _browser.close(); _browser = null; } } catch {}
@@ -785,10 +802,6 @@ process.on('SIGINT', async () => {
 process.on('unhandledRejection', (reason) => {
   console.warn('[StealthProxy] UnhandledRejection:', reason?.message || reason);
 });
-// process.on('uncaughtException', (err) => {
-// console.error(`Uncaught Exception at ${new Date().toISOString()}:`, err);
-// process.exit(1);
-// });
 process.on('uncaughtException', (err) => {
   console.error(`Uncaught Exception at ${new Date().toISOString()}:`, err);
   // НЕ робимо process.exit — нехай живе; systemd сам перезапустить якщо справді все погано

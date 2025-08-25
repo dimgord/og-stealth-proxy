@@ -126,18 +126,43 @@ $(function () {
     }
   }
 
+  // async function tryEmbedFbPost(href, $link, contentBlock) {
+  //   const r = await fetch(CAN_EMB_API + encodeURIComponent(href)).then(x=>x.json()).catch(()=>({ok:false}));
+  //   if (r.ok) {
+  //     // вставляємо fb-post
+  //     $link.after('<div class="fb-post" data-href="'+href+'" data-width="500" style="margin:10px 0"></div>');
+  //     ensureFbSdk(contentBlock[0]);
+  //   } else {
+  //     // fallback: OG‑картка
+  //     const og = await fetchOG(href);
+  //     const card = renderOGCard(og || { url: href });
+  //     $link.after(card);
+  //   }
+  // }
   async function tryEmbedFbPost(href, $link, contentBlock) {
-    const r = await fetch(CAN_EMB_API + encodeURIComponent(href)).then(x=>x.json()).catch(()=>({ok:false}));
-    if (r.ok) {
-      // вставляємо fb-post
-      $link.after('<div class="fb-post" data-href="'+href+'" data-width="500" style="margin:10px 0"></div>');
-      ensureFbSdk(contentBlock[0]);
-    } else {
-      // fallback: OG‑картка
-      const og = await fetchOG(href);
-      const card = renderOGCard(og || { url: href });
-      $link.after(card);
+    const url = OG_API + '/can-embed-fb?href=' + encodeURIComponent(href) + '&origin=' + encodeURIComponent(location.origin);
+    const r = await fetch(url).then(x => x.json()).catch(() => ({ ok: false }));
+
+    if (r.ok && r.src) {
+      const widgetId = 'facebook-post-iframe-' + btoa(r.cleanHref || href).slice(0, 10);
+      if (contentBlock.find('#' + widgetId).length === 0) {
+        const $wrap = $('<div/>', { id: widgetId, class: 'fb-post-iframe', css: { margin: '10px 0' } });
+        $wrap.html(r.html || (
+          '<iframe src="' + r.src + '" width="500" height="680" style="border:none;overflow:hidden" ' +
+          'scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>'
+        ));
+        $link.after($wrap);
+      }
+      $link.data('fb-embedded', true);
+      return true;
     }
+
+    // fallback → OG‑картка
+    const og = await fetchOG(r.cleanHref || href);
+    const card = renderOGCard(og || { url: href });
+    $link.after(card);
+    $link.data('fb-embedded', true);
+    return false;
   }
 
   // --- main scan ---
