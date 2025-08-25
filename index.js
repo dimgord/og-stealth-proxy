@@ -719,7 +719,7 @@ async function probeFbPlugin(src, { referer, timeoutMs = 9000, log = console } =
   // }
   // груба евристика «виглядає як робочий плагін»
   const looksOk = /<html|<iframe|class="[^"]*fb_post|data-testid="post_message"/i.test(text);
-  return { ok: looksOk && res.ok, status: res.status || 0, reason: looksOk ? 'ok' : 'unknown' };
+  return { ok: looksOk && res.ok, status: res.status || 0, reason: looksOk ? 'ok' : 'unknown', text };
 }
 
 app.get('/can-embed-fb', async (req, res) => {
@@ -743,7 +743,7 @@ app.get('/can-embed-fb', async (req, res) => {
         cleanHref,
         src: srcWWW,
         // даю ще готовий HTML-фрагмент (на випадок, якщо хочеш просто вставити рядок)
-        html: `<iframe src="${srcWWW}" width="500" height="680" style="border:none;overflow:hidden" scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>`
+        html: r.text // `<iframe src="${srcWWW}" width="500" height="680" style="border:none;overflow:hidden" scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>`
       });
     }
 
@@ -755,7 +755,7 @@ app.get('/can-embed-fb', async (req, res) => {
         host: 'm.facebook.com',
         cleanHref,
         src: srcM,
-        html: `<iframe src="${srcM}" width="500" height="680" style="border:none;overflow:hidden" scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>`
+        html: r.text // `<iframe src="${srcM}" width="500" height="680" style="border:none;overflow:hidden" scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>`
       });
     }
 
