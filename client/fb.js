@@ -11,20 +11,20 @@ $(function () {
 
   const isPost = (u) => /https?:\/\/www\.facebook\.com\/([^\/?]+)\/posts\/(\d+)/i.exec(u);
   const isVideo = (u) => {
-    // https://www.facebook.com/videos/12345
-    const a = /https?:\/\/www\.facebook\.com\/(?:[^\/?]+\/)?videos\/(\d+)/i.exec(u);
-    if (a)
-      return { id: a[1], type: 'videos' };
+    const s = String(u || '');
+    let m;
   
-    // https://www.facebook.com/watch?v=12345
-    const b = /https?:\/\/www\.facebook\.com\/watch\/?\?v=(\d+)/i.exec(u);
-    if (b)
-      return { id: b[1], type: 'watch' };
+    // https://www.facebook.com/watch?v=123
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/watch\/?\?v=(\d+)/i.exec(s);
+    if (m) return { id: m[1], type: 'watch' };
   
-    // https://www.facebook.com/<user>/videos/<slug>/<id>/
-    const c = /https?:\/\/www\.facebook\.com\/[^\/?]+\/videos\/[^\/?]+\/(\d+)/i.exec(u);
-    if (c)
-      return { id: c[1], type: 'videos' };
+    // https://www.facebook.com/<user>/videos/<slug>/<id>/  або  /<user>/videos/<id>/
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/([^\/?#]+)\/videos\/(?:[^\/?#]+\/)?(\d+)/i.exec(s);
+    if (m) return { id: m[2], type: 'user', user: m[1] };
+  
+    // https://www.facebook.com/videos/123
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/videos\/(\d+)/i.exec(s);
+    if (m) return { id: m[1], type: 'videos' };
   
     return null;
   };
@@ -149,15 +149,22 @@ $(function () {
           matched = true;
         }
 
-        // 2) videos (/videos/<id> OR /watch?v=<id>)
+        // 2) videos (/videos/<id>, <user id>/videos/<id> OR /watch?v=<id>)
         if (!matched) {
           const v = isVideo(href);
           if (v) {
             const widgetId = 'facebook-video-' + v.id;
             if (contentBlock.find('#' + widgetId).length === 0) {
-              var dataHref = (v.type === 'watch')
-                ? 'https://www.facebook.com/watch/?v=' + v.id
-                : 'https://www.facebook.com/videos/' + v.id;
+              let dataHref;
+              if (v.type === 'watch') {
+                dataHref = 'https://www.facebook.com/watch/?v=' + v.id;
+              } else if (v.type === 'user') {
+                // user-case: будуємо URL на сторінці користувача/сторінки
+                dataHref = 'https://www.facebook.com/' + encodeURIComponent(v.user) + '/videos/' + v.id;
+              } else {
+                // bare /videos/<id>
+                dataHref = 'https://www.facebook.com/videos/' + v.id;
+              }
 
               $link.after(
                 '<div id="' + widgetId + '" class="fb-video" ' +
