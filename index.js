@@ -711,6 +711,7 @@ async function probeFbPlugin(src, { referer, timeoutMs = 9000, log = console } =
   const res = await fetch(src, { method: 'GET', headers, redirect: 'follow', signal: ctrl });
   const text = await res.text().catch(() => '');
   log.info?.('[StealthProxy] can-embed-fb: status', res.status, 'len', text.length);
+  log.info?.('[StealthProxy] can-embed-fb: text', text);
 
   if (!text) return { ok: false, status: res.status || 0, reason: 'empty' };
   if (/This Facebook post is no longer available/i.test(text)) {
