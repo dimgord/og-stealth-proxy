@@ -714,9 +714,9 @@ async function probeFbPlugin(src, { referer, timeoutMs = 9000, log = console } =
   log.info?.('[StealthProxy] can-embed-fb: text', text);
 
   if (!text) return { ok: false, status: res.status || 0, reason: 'empty' };
-  if (/This Facebook post is no longer available/i.test(text)) {
-    return { ok: false, status: res.status || 200, reason: 'not-available' };
-  }
+  // if (/This Facebook post is no longer available/i.test(text)) {
+  //   return { ok: false, status: res.status || 200, reason: 'not-available' };
+  // }
   // груба евристика «виглядає як робочий плагін»
   const looksOk = /<html|<iframe|class="[^"]*fb_post|data-testid="post_message"/i.test(text);
   return { ok: looksOk && res.ok, status: res.status || 0, reason: looksOk ? 'ok' : 'unknown' };
