@@ -72,6 +72,15 @@ $(function () {
     return null;
   };
 
+  const isExtPost = (u) => {
+    const s = String(u || '');
+    let m;
+    // user/page posts з опційним slug
+    m = /^https?:\/\/(?:www\.)?facebook\.com\/([^\/?#]+)\/([^\/?#]+)\/posts\/(?:[^\/?#]+\/)?(\d+)/i.exec(s);
+    if (m) return { type: 'post', id: m[3], href: s, user: m[1] };
+    return null;
+  };
+
 // «класичні» фото-URL
   const isPhotoNew = (u) => /^https?:\/\/(?:www\.)?facebook\.com\/photo\/\?[^#]*\bfbid=(\d+)/i.exec(String(u || ''));
   const isAlbumPhoto = (u) => {
@@ -88,7 +97,6 @@ $(function () {
   const isPermalink = (u) => /^https?:\/\/(?:www\.)?facebook\.com\/permalink\.php\?/i.test(String(u || ''));
   const isEvent = (u) => /^https?:\/\/(?:www\.)?facebook\.com\/events\/(\d+)/i.exec(String(u || ''));
 
-
   // --- helpers ---
   const isFbShort = (u) => /^https?:\/\/fb\.me\/.+/i.test(u);
   const normFb = (u) => u.replace(/^https?:\/\/m\.facebook\.com/i, 'https://www.facebook.com');
@@ -96,7 +104,6 @@ $(function () {
   const isPost = (u) => /https?:\/\/www\.facebook\.com\/([^\/?]+)\/posts\/(\d+)/i.exec(u);
 
   const isShare = (u) => /https?:\/\/www\.facebook\.com\/share\/[a-z]\/([A-Za-z0-9]+)/i.exec(u);
-
 
   async function expandFb(url) {
     try {
@@ -192,36 +199,36 @@ $(function () {
   //   return false;
   // }
 
-  async function tryEmbedFbPost(href, $link, contentBlock) {
-    const url = CAN_EMB_API + encodeURIComponent(href) + '&origin=' + encodeURIComponent(location.origin);
-    const r = await fetch(url).then(x => x.json()).catch(() => ({ ok:false }));
-
-    if (r.ok && r.src) {
-      const clean = r.cleanHref || href;
-      const widgetId = 'facebook-post-iframe-' + btoa(clean).slice(0,10);
-
-      if (!hasInBlock(contentBlock, widgetId)) {
-        const html = r.html || (
-          '<div id="'+widgetId+'" class="fb-post-iframe" style="margin:10px 0">' +
-          '<iframe src="'+r.src+'" width="500" height="680" style="border:none;overflow:hidden" ' +
-          'scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>' +
-          '</div>'
-        );
-        insertAfterLink($link, html);
-      }
-      // помітити, що вже оброблено (і для jQ, і без)
-      if (isJQ($link)) { $link.data('fb-embedded', true); } else { $link.dataset.fbEmbedded = '1'; }
-      return true;
-    }
-
-    // fallback → OG‑картка
-    const og = await fetchOG(href);
-    const card = renderOGCard(og || { url: href });
-    // card може бути DOM-нода або HTML-string — обидва варіанти працюють
-    insertAfterLink($link, card);
-    if (isJQ($link)) { $link.data('fb-embedded', true); } else { $link.dataset.fbEmbedded = '1'; }
-    return false;
-  }
+  // async function tryEmbedFbPost(href, $link, contentBlock) {
+  //   const url = CAN_EMB_API + encodeURIComponent(href) + '&origin=' + encodeURIComponent(location.origin);
+  //   const r = await fetch(url).then(x => x.json()).catch(() => ({ ok:false }));
+  //
+  //   if (r.ok && r.src) {
+  //     const clean = r.cleanHref || href;
+  //     const widgetId = 'facebook-post-iframe-' + btoa(clean).slice(0,10);
+  //
+  //     if (!hasInBlock(contentBlock, widgetId)) {
+  //       const html = r.html || (
+  //         '<div id="'+widgetId+'" class="fb-post-iframe" style="margin:10px 0">' +
+  //         '<iframe src="'+r.src+'" width="500" height="680" style="border:none;overflow:hidden" ' +
+  //         'scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>' +
+  //         '</div>'
+  //       );
+  //       insertAfterLink($link, html);
+  //     }
+  //     // помітити, що вже оброблено (і для jQ, і без)
+  //     if (isJQ($link)) { $link.data('fb-embedded', true); } else { $link.dataset.fbEmbedded = '1'; }
+  //     return r;
+  //   }
+  //
+  //   // fallback → OG‑картка
+  //   const og = await fetchOG(href);
+  //   const card = renderOGCard(og || { url: href });
+  //   // card може бути DOM-нода або HTML-string — обидва варіанти працюють
+  //   insertAfterLink($link, card);
+  //   if (isJQ($link)) { $link.data('fb-embedded', true); } else { $link.dataset.fbEmbedded = '1'; }
+  //   return false;
+  // }
 
   // --- main scan ---
   const posts = $('div.postbody:contains("facebook.com/"), div.postbody:contains("fb.me/")');
@@ -249,17 +256,21 @@ $(function () {
         const share = isShare(href);
         // only share for now, if 'normal' links - leave it to the forum's processor
         if (share) {
+          let matched = false;
+          let expanded = false;
           try {
-            const expanded = await expandFb(href);
+            expanded = await expandFb(href);
             if (expanded) {
               href = normFb(expanded);
               console.log('[FacebookEmbed] share expanded →', href);
+            } else {
+              console.warn('[FacebookEmbed] share expand failed', href);
             }
           } catch (e) {
             console.warn('[FacebookEmbed] share expand failed', e);
+            matched = true; // fallback to generic embed
           }
 
-          let matched = false;
 
 //           // 1) videos (/videos/<id>, <user id>/videos/<id> OR /watch?v=<id>)
 //           const v = isVideo(href);
@@ -438,6 +449,50 @@ $(function () {
 
 
 ////////////////////////// нове /////////////////////////
+          // 'normal' posts
+          if (!matched) {
+            const postMatch = isPost(href);
+            if (postMatch) {
+              const page = postMatch[1];
+              const postId = postMatch[2];
+              const widgetId = 'facebook-post-' + page + '-' + postId;
+              if (contentBlock.find('#' + widgetId).length === 0) {
+                $link.after(
+                  '<div id="' + widgetId + '" class="fb-post" ' +
+                  'data-href="https://www.facebook.com/' + page + '/posts/' + postId + '" ' +
+                  'data-width="500" ' +
+                  'style="margin-top:10px;margin-bottom:10px;"></div>'
+                );
+                ensureFbSdk(contentBlock[0]);
+              }
+              $link.data('fb-embedded', true);
+              matched = true;
+              console.log('[FacebookEmbed]: matched post ', href);
+            }
+          }
+
+          // extended posts
+          if (!matched) {
+            const postMatch = isExtPost(href);
+            if (postMatch) {
+              const page = postMatch.user;
+              const postId = postMatch.id;
+              const widgetId = 'facebook-post-' + page + '-' + postId;
+              if (contentBlock.find('#' + widgetId).length === 0) {
+                $link.after(
+                  '<div id="' + widgetId + '" class="fb-post" ' +
+                  'data-href="https://www.facebook.com/' + page + '/posts/' + postId + '" ' +
+                  'data-width="500" ' +
+                  'style="margin-top:10px;margin-bottom:10px;"></div>'
+                );
+                ensureFbSdk(contentBlock[0]);
+              }
+              $link.data('fb-embedded', true);
+              matched = true;
+              console.log('[FacebookEmbed]: matched extended post ', href);
+            }
+          }
+
           if (!matched) {
             const v = isVideo(href);
             if (v) {
@@ -460,13 +515,15 @@ $(function () {
               }
               $link.data('fb-embedded', true);
               matched = true;
+              console.log('[FacebookEmbed]: matched video ', href);
             }
           }
 
+          // reels
           if (!matched) {
-            const reel = isReel(href);
-            if (reel) {
-              const reelId = reel[1];
+            const reelMatch = isReel(href);
+            if (reelMatch) {
+              const reelId = reelMatch[1];
               const widgetId = 'facebook-reel-' + reelId;
               if (contentBlock.find('#' + widgetId).length === 0) {
                 $link.after(
@@ -479,29 +536,7 @@ $(function () {
               }
               $link.data('fb-embedded', true);
               matched = true;
-            }
-          }
-
-          if (!matched) {
-            const p = isFbPost(href);
-            if (p) {
-              // before using href in data-href
-              const cleanHref = p.href
-                .replace(/(\?|&)rdid=[^&#]*/gi, '')
-                .replace(/(\?|&)share_url=[^&#]*/gi, '')
-                .replace(/(\?|&)m=1\b/gi, '')
-                .replace(/[#?]&?$/,''); // зайві хвости
-              tryEmbedFbPost(cleanHref, $link, contentBlock);
-              // if (contentBlock.find('#' + widgetId).length === 0) {
-              //   $link.after(
-              //     '<div id="' + widgetId + '" class="fb-post" ' +
-              //     'data-href="' + cleanHref + '" data-width="500" ' +
-              //     'style="margin-top:10px;margin-bottom:10px;"></div>'
-              //   );
-              //   ensureFbSdk(contentBlock[0]);
-              // }
-              // $link.data('fb-embedded', true);
-              matched = true;
+              console.log('[FacebookEmbed]: matched reel ', href);
             }
           }
 
@@ -521,6 +556,7 @@ $(function () {
               }
               $link.data('fb-embedded', true);
               matched = true;
+              console.log('[FacebookEmbed]: matched photo ', href);
             }
           }
 
@@ -539,6 +575,7 @@ $(function () {
               }
               $link.data('fb-embedded', true);
               matched = true;
+              console.log('[FacebookEmbed]: matched album photo ', href);
             }
           }
 
@@ -556,6 +593,7 @@ $(function () {
               }
               $link.data('fb-embedded', true);
               matched = true;
+              console.log('[FacebookEmbed]: matched story.php / permalink.php ', href);
             }
           }
 
@@ -572,22 +610,81 @@ $(function () {
               }
               $link.data('fb-embedded', true);
               matched = true;
+              console.log('[FacebookEmbed]: matched event ', href);
             }
+          }
 
-            // generic fallback
-            if (!matched) {
-              const widgetId = 'facebook-fallback-' + Math.random().toString(36).substr(2, 8);
-              $link.after(
-                '<div id="' + widgetId + '" style="margin-top:10px;padding:10px;border:1px solid #ccc;background:#f5f8fa;border-radius:6px;max-width:500px;">' +
-                '<img src="https://static.xx.fbcdn.net/rsrc.php/yd/r/hlvibnBVrEb.svg" alt="Facebook" style="height:22px;vertical-align:middle;margin-right:10px;" />' +
-                '<a href="' + href + '" target="_blank" style="font-weight:bold;color:#1877f2;text-decoration:none;">' +
-                'Could not expand this link, please view it on Facebook</a></div>'
-              );
+          if (!matched) {
+            const p = isFbPost(href);
+            if (p) {
+              // before using href in data-href
+              const cleanHref = p.href
+                .replace(/(\?|&)rdid=[^&#]*/gi, '')
+                .replace(/(\?|&)share_url=[^&#]*/gi, '')
+                .replace(/(\?|&)m=1\b/gi, '')
+                .replace(/[#?]&?$/,''); // зайві хвости
+              /////
+              const url = CAN_EMB_API + encodeURIComponent(cleanHref) + '&origin=' + encodeURIComponent(location.origin);
+              const r = await fetch(url).then(x => x.json()).catch(() => ({ ok:false }));
+
+              if (r.ok && r.src) {
+                const clean = r.cleanHref || cleanHref;
+                const widgetId = 'facebook-post-iframe-' + btoa(clean).slice(0,10);
+
+                if (!hasInBlock(contentBlock, widgetId)) {
+                  const html = r.html || (
+                    '<div id="'+widgetId+'" class="fb-post-iframe" style="margin:10px 0">' +
+                    '<iframe src="'+r.src+'" width="500" height="680" style="border:none;overflow:hidden" ' +
+                    'scrolling="no" frameborder="0" allow="encrypted-media; picture-in-picture; web-share; clipboard-write"></iframe>' +
+                    '</div>'
+                  );
+                  insertAfterLink($link, html);
+                }
+              } else {
+                // fallback → OG‑картка
+                const og = await fetchOG(href);
+                const card = renderOGCard(og || {url: href});
+                // card може бути DOM-нода або HTML-string — обидва варіанти працюють
+                insertAfterLink($link, card);
+              }
               $link.data('fb-embedded', true);
+              matched = true;
+              console.log('[FacebookEmbed]: matched extended post ', href);
             }
+          }
+
+          // generic fallback
+          if (!matched || !expanded) {
+            const widgetId = 'facebook-fallback-' + Math.random().toString(36).substr(2, 8);
+            $link.after(
+              '<div id="' + widgetId + '" style="margin-top:10px;padding:10px;border:1px solid #ccc;background:#f5f8fa;border-radius:6px;max-width:500px;">' +
+              '<img src="https://static.xx.fbcdn.net/rsrc.php/yd/r/hlvibnBVrEb.svg" alt="Facebook" style="height:22px;vertical-align:middle;margin-right:10px;" />' +
+              '<a href="' + href + '" target="_blank" style="font-weight:bold;color:#1877f2;text-decoration:none;">' +
+              'Could not expand this link, please view it on Facebook</a></div>'
+            );
+            $link.data('fb-embedded', true);
           }
 ////////////////////////// кінець нового ////////////////
         } // only share, if 'normal' links - leave it to the forum's processor
+        // reels additionally
+        const reelMatch = isReel(href);
+        if (reelMatch) {
+          const reelId = reelMatch[1];
+          const widgetId = 'facebook-reel-' + reelId;
+          if (contentBlock.find('#' + widgetId).length === 0) {
+            $link.after(
+              '<div id="' + widgetId + '" class="fb-video" ' +
+              'data-href="https://www.facebook.com/reel/' + reelId + '" ' +
+              'data-width="500" ' +
+              'style="margin-top:10px;margin-bottom:10px;"></div>'
+            );
+            ensureFbSdk(contentBlock[0]);
+          }
+          $link.data('fb-embedded', true);
+          $link.remove();
+          matched = true;
+          console.log('[FacebookEmbed]: matched reel ', href);
+        }
       })();
     });
   });

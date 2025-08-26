@@ -31,6 +31,8 @@ $(function () {
 
       // Додаємо iframe одразу після лінка
       $link.after(iframeHTML);
+      // Ховаємо лінку
+      $link.remove();
 
       setTimeout(function () {
         const iframe = document.getElementById(widgetId);
@@ -45,6 +47,8 @@ $(function () {
                 View Telegram Post</a>
             </div>`;
           $link.after(fallback);
+          // Ховаємо лінку
+          $link.remove();
         } else {
           console.log("[TelegramEmbed] iframe embed visible for " + channel + "/" + messageId);
           const height = iframe.clientHeight;
