@@ -25,14 +25,14 @@ $(function () {
 
       const iframeHTML = `
         <iframe id="${widgetId}" src="${iframeURL}"
-          width="90%" height="500" frameborder="0" scrolling="yes"
+          width="90%" height="500" border="0" scrolling="auto"
           style="border: 1px solid #ccc; border-radius: 6px; margin-top: 10px; max-width: 500px; width: 90%; display: block; margin-left: auto; margin-right: auto;">
         </iframe>`;
 
       // Додаємо iframe одразу після лінка
       $link.after(iframeHTML);
       // Ховаємо лінку
-      $link.remove();
+      $link.context.attributes.href.value = null;
 
       setTimeout(function () {
         const iframe = document.getElementById(widgetId);
@@ -48,7 +48,7 @@ $(function () {
             </div>`;
           $link.after(fallback);
           // Ховаємо лінку
-          $link.remove();
+          $link.context.attributes.href.value = null;
         } else {
           console.log("[TelegramEmbed] iframe embed visible for " + channel + "/" + messageId);
           const height = iframe.clientHeight;

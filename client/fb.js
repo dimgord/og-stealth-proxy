@@ -254,9 +254,9 @@ $(function () {
 
         // Обробка /share/* → спершу розкручуємо через /resolve, тоді знову normFb
         const share = isShare(href);
+        let matched = false;
         // only share for now, if 'normal' links - leave it to the forum's processor
-        if (share) {
-          let matched = false;
+        if (0/*share*/) { // switched off until better times
           let expanded = false;
           try {
             expanded = await expandFb(href);
@@ -681,9 +681,30 @@ $(function () {
             ensureFbSdk(contentBlock[0]);
           }
           $link.data('fb-embedded', true);
-          $link.remove();
+          // remove href from the link, make it invisible to the user
+          $link.context.attributes.href.value = null;
           matched = true;
           console.log('[FacebookEmbed]: matched reel ', href);
+        }
+        if (!matched) {
+          const phNew = isPhotoNew(href);
+          if (phNew) {
+            const fbid = phNew[1];
+            const widgetId = 'facebook-photo-' + fbid;
+            if (contentBlock.find('#' + widgetId).length === 0) {
+              $link.after(
+                '<div id="' + widgetId + '" class="fb-post" ' +
+                'data-href="' + href + '" data-width="500" ' +
+                'style="margin-top:10px;margin-bottom:10px;"></div>'
+              );
+              ensureFbSdk(contentBlock[0]);
+            }
+            $link.data('fb-embedded', true);
+            // remove href from the link, make it invisible to the user
+            $link.context.attributes.href.value = null;
+            matched = true;
+            console.log('[FacebookEmbed]: matched photo ', href);
+          }
         }
       })();
     });
