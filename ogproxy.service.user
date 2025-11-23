@@ -1,0 +1,32 @@
+[Unit]
+Description=StealthProxy (OG Preview)
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=dimgord
+WorkingDirectory=/home/dimgord/projs/og-stealth-proxy
+Environment=NODE_ENV=production
+Environment=PORT=3000
+LimitNOFILE=65536
+Restart=always
+RestartSec=2s
+KillSignal=SIGTERM
+TimeoutStopSec=8s
+KillMode=control-group
+SendSIGKILL=yes
+
+ExecStart=/usr/bin/node /home/dimgord/projs/og-stealth-proxy/index.js
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=StealthProxy
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+
