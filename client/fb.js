@@ -666,6 +666,33 @@ $(function () {
           }
 ////////////////////////// кінець нового ////////////////
         } // only share, if 'normal' links - leave it to the forum's processor
+        // videos
+        if (!matched) {
+          const v = isVideo(href);
+          if (v) {
+            const widgetId = 'facebook-video-' + v.id;
+            if (contentBlock.find('#' + widgetId).length === 0) {
+              let dataHref;
+              if (v.type === 'watch') {
+                dataHref = 'https://www.facebook.com/watch/?v=' + v.id;
+              } else if (v.type === 'user') {
+                dataHref = 'https://www.facebook.com/' + encodeURIComponent(v.user) + '/videos/' + v.id;
+              } else {
+                dataHref = 'https://www.facebook.com/videos/' + v.id;
+              }
+              $link.after(
+                '<div id="' + widgetId + '" class="fb-video" ' +
+                'data-href="' + dataHref + '" data-width="500" ' +
+                'style="margin-top:10px;margin-bottom:10px;"></div>'
+              );
+              ensureFbSdk(contentBlock[0]);
+            }
+            $link.data('fb-embedded', true);
+            $link.context.attributes.href.value = null;
+            matched = true;
+            console.log('[FacebookEmbed]: matched video ', href);
+          }
+        }
         // reels additionally
         const reelMatch = isReel(href);
         if (reelMatch) {
