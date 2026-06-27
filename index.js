@@ -29,7 +29,7 @@ async function getBrowser() {
 
   _browser = await puppeteer.launch({
     headless: true,
-    executablePath: '/usr/bin/google-chrome-stable',
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
     userDataDir, // ← ← ВАЖЛИВО: унікальна директорія профілю
     args: [
       '--headless',
