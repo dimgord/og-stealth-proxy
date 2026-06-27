@@ -530,6 +530,63 @@ app.get('/og-proxy', async (req, res) => {
   return res.status(og.status || 200).json(og);
 });
 
+// Render a page with the stealth browser and return the rendered DOM — for
+// sites behind Cloudflare/JS where /og-proxy's OG-only output isn't enough.
+//   GET /render?url=<target>
+//     &wait=<css>     optional: waitForSelector before reading
+//     &sel=<css>      optional: return textContent of each match (array) instead of HTML
+//     &timeout=<ms>   optional: nav / wait timeout (default 30000, max 60000)
+app.get('/render', async (req, res) => {
+  const inUrl = toUrlString(req.query.url);
+  if (!inUrl || !/^https?:\/\//.test(inUrl)) {
+    return res.status(400).json({ error: 'Invalid or missing URL' });
+  }
+  const waitSel = req.query.wait ? String(req.query.wait) : null;
+  const sel = req.query.sel ? String(req.query.sel) : null;
+  const timeout = Math.min(parseInt(req.query.timeout, 10) || 30000, 60000);
+
+  try {
+    const out = await queue.add(async () => {
+      let page = null;
+      try {
+        const browser = await getBrowser();
+        page = await browser.newPage();
+        await page.setUserAgent(DEFAULT_UA);
+        await page.setExtraHTTPHeaders({ 'Accept-Language': DEFAULT_LANG });
+        await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
+        await page.evaluateOnNewDocument(() => {
+          Object.defineProperty(navigator, 'webdriver', { get: () => false });
+          window.chrome = { runtime: {} };
+          Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+          Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        });
+        await page.goto(normalizeUrl(inUrl), { waitUntil: 'domcontentloaded', timeout });
+        // Give a Cloudflare/JS challenge time to resolve (the interstitial
+        // reloads into the real page); wait for the caller's selector if given.
+        if (waitSel) {
+          try { await page.waitForSelector(waitSel, { timeout }); } catch { /* fall through */ }
+        } else {
+          await delay(4000);
+        }
+        const finalUrl = page.url();
+        const title = await page.title().catch(() => '');
+        if (sel) {
+          const items = await page.$$eval(sel, (els) => els.map((e) => (e.textContent || '').trim()));
+          return { finalUrl, title, sel, count: items.length, items };
+        }
+        const html = await page.content();
+        return { finalUrl, title, length: html.length, html };
+      } finally {
+        await safeClosePage(page, console);
+      }
+    });
+    return res.json(out);
+  } catch (err) {
+    console.error('[StealthProxy] render error:', err?.message);
+    return res.status(500).json({ error: 'render-error', message: err?.message });
+  }
+});
+
 app.get('/resolve', async (req, res) => {
   let result;
   try {
