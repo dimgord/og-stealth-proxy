@@ -36,8 +36,9 @@
 - **Verified** (headless, live script with the FB part swapped for the new `fb.js`): photo `?fbid` →
   `plugins/post.php` iframe with the post rendered; `/posts/` → forumotion's `fb_frame_embed.php`, no
   duplicate; `m.facebook.com/reel/…?mibextid=…` and a reel link inside text → FB video player; a fake
-  share link and a fake `fb.watch` → "View on Facebook" card. A real share link: pending one from the
-  owner.
+  share link and a fake `fb.watch` → "View on Facebook" card. A real share link from the owner,
+  `/share/p/19ZUAf5XQr`: `/resolve` → `/<page>/posts/pfbid…` in 2.8 s (method `auto`) → `plugins/post.php`
+  iframe, post text and photos rendered.
 - **Added:** `CLAUDE.md`, `PROGRESS.md`, `Taskfile.yml` (`check`, `restart`, `logs`, `probe`, `live`),
   `client/live/99578.min.js` (the forum's combined JS as of today).
 - **Deploy:** the owner replaces the FB code in forumotion admin with `client/fb.js`.
