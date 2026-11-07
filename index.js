@@ -611,46 +611,51 @@ app.get('/resolve', async (req, res) => {
     try { const tmp = new URL(candidate); host = tmp.hostname; path = tmp.pathname; } catch {}
 
     // 3) список шортенерів/редіректорів, для яких йдемо по мережі
-    const needsNetworkHost = /^(?:fb\.me|l\.facebook\.com|l\.instagram\.com|t\.co|bit\.ly|tinyurl\.com|goo\.gl|ow\.ly)$/i;
-    const isFbShare = host && /(?:^|\.)facebook\.com$/i.test(host) && /^\/share\/[a-z]\/[A-Za-z0-9]+\/?$/i.test(path);
+    const needsNetworkHost = /^(?:fb\.me|fb\.watch|l\.facebook\.com|l\.instagram\.com|t\.co|bit\.ly|tinyurl\.com|goo\.gl|ow\.ly)$/i;
+    // FB share links: /share/r/<id>, /share/p/<id>, /share/v/<id> and the newer letterless /share/<id>
+    const FB_SHARE_PATH = /^\/share\/(?:[a-z]\/)?[A-Za-z0-9]+\/?$/i;
+    const isFbShare = host && /(?:^|\.)facebook\.com$/i.test(host) && FB_SHARE_PATH.test(path);
+    // a "result" that is still a share link (e.g. ?_fb_noscript=1 appended) is not a resolution
+    const progressed = (u) => {
+      if (!u || u === candidate) return false;
+      try { const x = new URL(u); return !(/(?:^|\.)facebook\.com$/i.test(x.hostname) && FB_SHARE_PATH.test(x.pathname)); }
+      catch { return false; }
+    };
 
     console.info('[StealthProxy][resolve] host, isFbShare →', host, isFbShare);
 
     if (host && (needsNetworkHost.test(host) || isFbShare)) {
       console.info('[StealthProxy][resolve] network-follow for', candidate);
       try {
+        // 3a) швидко: дати fetch'у самому пройти редіректи і взяти res.url
+        const auto = await autoFollow(candidate, 10000);
+        if (progressed(auto)) {
+          const finalUrl = normalizeUrl(auto);
+          console.info('[StealthProxy][resolve] auto-follow →', finalUrl);
+          return res.json({ finalUrl, method: 'auto' });
+        }
+        // 3b) manual hops
+        const out = await followRedirectsManual(candidate, { maxHops: 10, timeoutMs: 10000, log: console });
+        if (progressed(out.finalUrl)) {
+          const finalUrl = normalizeUrl(out.finalUrl);
+          console.info('[StealthProxy][resolve] manual-follow →', finalUrl);
+          return res.json({ finalUrl, hops: out.hops, method: 'manual' });
+        }
         if (isFbShare) {
-          // 3a) швидко: дати fetch'у самому пройти редіректи і взяти res.url
-          const auto = await autoFollow(candidate, 10000);
-          if (auto && auto !== candidate) {
-            const finalUrl = normalizeUrl(auto);
-            console.info('[StealthProxy][resolve] auto-follow →', finalUrl);
-            return res.json({ finalUrl, method: 'auto' });
-          }
-          // 3b) manual hops
-          const out = await followRedirectsManual(candidate, { maxHops: 10, timeoutMs: 10000, log: console });
-          if (out.finalUrl && out.finalUrl !== candidate) {
-            const finalUrl = normalizeUrl(out.finalUrl);
-            console.info('[StealthProxy][resolve] manual-follow →', finalUrl);
-            return res.json({ finalUrl, hops: out.hops, method: 'manual' });
-          }
-          // 3) FB share/* часто без 30x → HTML/OG fallback
+          // 3c) FB share/* часто без 30x → HTML/OG fallback
           console.info('[StealthProxy][resolve] share/*: try html/og canonical…');
           const canon = await resolveViaOgCanonical(candidate).catch(()=>null);
-          if (canon && canon !== candidate) {
+          if (progressed(canon)) {
             const finalUrl = normalizeUrl(canon);
             console.info('[StealthProxy][resolve] html/og-canonical →', finalUrl);
             return res.json({ finalUrl, method: 'html-canonical' });
           }
-          // 3 0) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
+          // 3d) ОСТАННІЙ ПРИТУЛОК: OG‑proxy шлях — беремо og.url як канонічний
           console.info('[StealthProxy][resolve] fallback to OG canonical…');
           const og = await getOgCanonical(candidate, 'resolve', { useBrowser: true, log: console });
           console.info('[StealthProxy][resolve] result: ', og);
-          if (og && og.url) {
-            const finalUrl = normalizeUrl(og.url);
-            if (finalUrl && finalUrl !== candidate) {
-              return res.json({ finalUrl, method: 'og-canonical' });
-            }
+          if (og && progressed(og.url)) {
+            return res.json({ finalUrl: normalizeUrl(og.url), method: 'og-canonical' });
           }
         }
         // якщо нічого не вийшло — віддаємо нормалізоване як є

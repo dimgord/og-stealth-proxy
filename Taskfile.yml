@@ -1,0 +1,36 @@
+version: "3"
+
+vars:
+  NODE: nix shell nixpkgs#nodejs -c node
+
+tasks:
+  check:
+    desc: Syntax-check the server and the forum client scripts
+    cmds:
+      - "{{.NODE}} --check index.js"
+      - for f in client/fb.js client/tg.js client/ig.js; do {{.NODE}} --check "$f" || exit 1; done
+
+  restart:
+    desc: Restart the ogproxy service on dvg-one (runs from this checkout; forum previews pause a few seconds)
+    cmds:
+      - sudo systemctl restart ogproxy
+      - sleep 3 && systemctl is-active ogproxy
+
+  logs:
+    desc: Follow the ogproxy log
+    cmds:
+      - journalctl -u ogproxy -f
+
+  probe:
+    desc: "Call the endpoints the forum uses: task probe URL=https://www.facebook.com/reel/..."
+    requires:
+      vars: [URL]
+    cmds:
+      - for e in resolve og-proxy; do echo "== $e"; curl -s -m 60 "https://www.dimgord.cc/$e?url=$(printf %s '{{.URL}}' | jq -sRr @uri)"; echo; done
+      - echo "== can-embed-fb"; curl -s -m 60 "https://www.dimgord.cc/can-embed-fb?href=$(printf %s '{{.URL}}' | jq -sRr @uri)" | head -c 300; echo
+
+  live:
+    desc: Save the forum's current combined JS (all forumotion JS codes) to client/live/
+    cmds:
+      - curl -sL -A Mozilla/5.0 https://2021-itmtank.forumgamers.net/99578.js -o client/live/99578.min.js
+      - wc -c client/live/99578.min.js
