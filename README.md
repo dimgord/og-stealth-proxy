@@ -27,7 +27,7 @@ Other endpoints: `/resolve?url=` (follows short and FB share links), `/can-embed
 
 `client/fb.js`, `tg.js`, `ig.js` embed Facebook, Telegram and Instagram links in itmtank forum posts.
 They are pasted into forumotion's admin (JavaScript codes management, all pages); the proxy only
-serves them data. `task live` saves what the forum runs now to `client/live/`.
+serves them data. `task live` saves what the forum runs now to `client/live/forum.min.js`.
 
 ## Tasks
 

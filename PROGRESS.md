@@ -1,5 +1,52 @@
 # Progress Log
 
+## Rev 2 — 2026-11-07
+
+**Telegram and Instagram embeds reworked; Facebook Rev 1 confirmed live**
+
+- **Facebook:** the owner pasted the Rev 1 `fb.js` into forumotion. Checked on the live forum (headless,
+  member markup): the share link `/share/p/19ZUAf5XQr`, `photo?fbid=…` and a `/reel/` all embed.
+- **Telegram, problems in the live script:**
+  - the iframe height was forced to 400 px ("too short" check on a fixed 500 px frame), so long posts were
+    cut and scrolled inside the frame;
+  - `t.me/s/<channel>/<id>` links (the web-preview form) did not match the regex, so no embed.
+- **Telegram, `client/tg.js` rewritten:**
+  - `t.me`, `telegram.me`, `telegram.dog`; `/<channel>/<id>` and `/s/<channel>/<id>`; `?single` kept;
+    private `t.me/c/…` and invite/channel links stay plain links;
+  - height follows the post: the embed page (`widget-frame.js`) posts `{"event":"resize","height":N}`
+    to its parent, a `message` listener sizes the matching iframe;
+  - same slot pattern as `fb.js` (replace the `[embed]` link before FA_Embed; keep links in text).
+- **Instagram, problems in the live script:**
+  - a `/p/` post was embedded **three times**: forumotion's FA_Embed returns its own
+    `blockquote.instagram-media` for `/p/`, our script added a second, embed.js rendered both (plus a
+    duplicate frame);
+  - the URL text stayed visible above a reel embed; `?igsh=` was not stripped (only `igshid`).
+- **Instagram, `client/ig.js` rewritten:**
+  - `/p/`, `/reel/`, `/reels/`, `/tv/`, `/<user>/p/…` → one `instagram-media` blockquote with the canonical
+    permalink, one embed.js load for the page;
+  - `/share/…` links via `/resolve`; `l.instagram.com` unwrapped; `igsh`, `igshid`, `utm_*` dropped;
+  - other IG links in an `[embed]` block (profile, …) → OG card; the login wall is not used as a preview;
+  - the slot replaces the `[embed]` link before FA_Embed, so forumotion no longer embeds `/p/` a second time.
+- **Server, `/resolve`:** Instagram `/share/…` links are followed too, and a result that is still an IG
+  share URL does not count as resolved. `ogproxy` restarted.
+- **Forum JS file name:** forumotion gives the combined JS a new name on every edit (`/99578.js` →
+  `/99729.js` after the FB paste). `task live` now reads the name from the home page and saves to
+  `client/live/forum.min.js` (renamed from `99578.min.js`, now today's live file with the Rev 1 FB code).
+- **Verified** (headless, member markup, live JS with the TG+IG parts swapped for the new files):
+  - TG `voynareal/130099` → 1282 px frame, whole post visible; `t.me/s/ButusovPlus/19500` → embedded,
+    398 px; `exilenova_plus/1297?single` → embedded with `&single=1` (500 px: lazy frame below the fold,
+    resizes once loaded);
+  - IG `/p/DfaHkFJDFJW/` → 1 frame (was 3), caption shown; `/reel/DfaclLuMMv8/?igsh=abc` → 1 frame, no URL
+    text, no `igsh`; profile `zelenskyy_official` → OG card.
+  - A real IG share link: not tested (none at hand).
+- **Deploy:** the owner replaces the Telegram and Instagram codes in forumotion admin with `client/tg.js`
+  and `client/ig.js`.
+
+Files modified: `client/tg.js`, `client/ig.js`, `index.js`, `Taskfile.yml`, `CLAUDE.md`, `README.md`,
+`PROGRESS.md`; `client/live/99578.min.js` → `client/live/forum.min.js`.
+
+Version: no version files in this repo.
+
 ## Rev 1 — 2026-11-07
 
 **Facebook embeds on the itmtank forum: share links, photo links, m.facebook links**
@@ -40,7 +87,7 @@
   `/share/p/19ZUAf5XQr`: `/resolve` → `/<page>/posts/pfbid…` in 2.8 s (method `auto`) → `plugins/post.php`
   iframe, post text and photos rendered.
 - **Added:** `CLAUDE.md`, `PROGRESS.md`, `Taskfile.yml` (`check`, `restart`, `logs`, `probe`, `live`),
-  `client/live/99578.min.js` (the forum's combined JS as of today).
+  `client/live/99578.min.js` (the forum's combined JS as of today; `forum.min.js` since Rev 2).
 - **Deploy:** the owner replaces the FB code in forumotion admin with `client/fb.js`.
 
 Files modified: `client/fb.js`, `index.js`, `README.md`; new `CLAUDE.md`, `PROGRESS.md`,

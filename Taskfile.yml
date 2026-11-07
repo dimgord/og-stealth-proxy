@@ -32,5 +32,9 @@ tasks:
   live:
     desc: Save the forum's current combined JS (all forumotion JS codes) to client/live/
     cmds:
-      - curl -sL -A Mozilla/5.0 https://2021-itmtank.forumgamers.net/99578.js -o client/live/99578.min.js
-      - wc -c client/live/99578.min.js
+      # the file name (/NNNNN.js) changes on every edit of a JS code in forumotion admin: read it from a page
+      - |
+        F=$(curl -sL -A Mozilla/5.0 https://2021-itmtank.forumgamers.net/ | grep -o '<script src="/[0-9]*\.js"' | grep -o '[0-9]*\.js')
+        echo "live file: /$F"
+        curl -sL -A Mozilla/5.0 "https://2021-itmtank.forumgamers.net/$F" -o client/live/forum.min.js
+        wc -c client/live/forum.min.js

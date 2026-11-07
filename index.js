@@ -615,16 +615,22 @@ app.get('/resolve', async (req, res) => {
     // FB share links: /share/r/<id>, /share/p/<id>, /share/v/<id> and the newer letterless /share/<id>
     const FB_SHARE_PATH = /^\/share\/(?:[a-z]\/)?[A-Za-z0-9]+\/?$/i;
     const isFbShare = host && /(?:^|\.)facebook\.com$/i.test(host) && FB_SHARE_PATH.test(path);
+    // IG share links: /share/<id>, /share/reel/<id>, /share/p/<id>
+    const isIgShare = host && /(?:^|\.)instagram\.com$/i.test(host) && /^\/share\//i.test(path);
     // a "result" that is still a share link (e.g. ?_fb_noscript=1 appended) is not a resolution
     const progressed = (u) => {
       if (!u || u === candidate) return false;
-      try { const x = new URL(u); return !(/(?:^|\.)facebook\.com$/i.test(x.hostname) && FB_SHARE_PATH.test(x.pathname)); }
-      catch { return false; }
+      try {
+        const x = new URL(u);
+        if (/(?:^|\.)facebook\.com$/i.test(x.hostname) && FB_SHARE_PATH.test(x.pathname)) return false;
+        if (/(?:^|\.)instagram\.com$/i.test(x.hostname) && /^\/share\//i.test(x.pathname)) return false;
+        return true;
+      } catch { return false; }
     };
 
     console.info('[StealthProxy][resolve] host, isFbShare →', host, isFbShare);
 
-    if (host && (needsNetworkHost.test(host) || isFbShare)) {
+    if (host && (needsNetworkHost.test(host) || isFbShare || isIgShare)) {
       console.info('[StealthProxy][resolve] network-follow for', candidate);
       try {
         // 3a) швидко: дати fetch'у самому пройти редіректи і взяти res.url

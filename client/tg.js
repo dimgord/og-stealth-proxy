@@ -1,65 +1,69 @@
+// Telegram post embeds for the itmtank forum (forumotion → JavaScript codes management, all pages).
+// Forumotion does not embed t.me itself. History and rationale: PROGRESS.md (Rev 2).
 $(function () {
-  console.log("[TelegramEmbed] Scanning posts for t.me links (iframe version)...");
+  const TAG = '[TelegramEmbed]';
+  const TG_HOST = /^(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)$/i;
 
-  const posts = $('div.postbody:contains("t.me/")');
+  console.log(TAG, 'scanning posts for t.me links…');
 
-  posts.each(function () {
-    const contentBlock = $(this);
-    // Знаходимо всі лінки t.me у цьому postbody
-    const links = contentBlock.find('a[href*="t.me/"]');
+  // t.me/<channel>/<id>, t.me/s/<channel>/<id> → {channel, id, single}; t.me/c/… (private) → null
+  function parsePost(u) {
+    let x;
+    try { x = new URL(u, location.href); } catch (e) { return null; }
+    if (!TG_HOST.test(x.hostname)) return null;
+    const m = /^\/(?:s\/)?([A-Za-z][A-Za-z0-9_]{3,})\/(\d+)\/?$/.exec(x.pathname);
+    if (!m || m[1].toLowerCase() === 'c') return null;
+    return { channel: m[1], id: m[2], single: x.searchParams.has('single') };
+  }
 
-    links.each(function () {
-      const $link = $(this);
-      const href = $link.attr('href');
-      const match = href.match(/https?:\/\/t\.me\/([a-zA-Z0-9_]+)\/(\d+)/);
+  // the embed page posts {"event":"resize","height":N} to its parent; size each frame to its post
+  const frames = new Map(); // contentWindow → iframe
+  window.addEventListener('message', function (e) {
+    if (!/^https:\/\/t\.me$/.test(e.origin)) return;
+    const f = frames.get(e.source);
+    if (!f) return;
+    let d;
+    try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (err) { return; }
+    if (d && d.event === 'resize' && d.height > 0) f.style.height = Math.ceil(d.height) + 'px';
+  });
 
-      if (!match) return;
+  function embed(slot, p) {
+    const f = document.createElement('iframe');
+    f.src = 'https://t.me/' + p.channel + '/' + p.id + '?embed=1' + (p.single ? '&single=1' : '');
+    f.loading = 'lazy';
+    f.setAttribute('scrolling', 'no');
+    f.style.cssText = 'display:block;width:100%;max-width:550px;height:500px;border:0;overflow:hidden;color-scheme:light;';
+    slot.appendChild(f);
+    frames.set(f.contentWindow, f);
+    // lazy frames get their window on load; register again then
+    f.addEventListener('load', function () { frames.set(f.contentWindow, f); });
+  }
 
-      const channel = match[1];
-      const messageId = match[2];
-      const widgetId = "telegram-iframe-" + channel + "-" + messageId;
-      const iframeURL = "https://t.me/" + channel + "/" + messageId + "?embed=1";
-
-      // щоб не дублювати, перевіряємо
-      if (contentBlock.find("#" + widgetId).length > 0) return;
-
-      const iframeHTML = `
-        <iframe id="${widgetId}" src="${iframeURL}"
-          width="90%" height="500" border="0" scrolling="auto"
-          style="border: 1px solid #ccc; border-radius: 6px; margin-top: 10px; max-width: 500px; width: 90%; display: block; margin-left: auto; margin-right: auto;">
-        </iframe>`;
-
-      // Додаємо iframe одразу після лінка
-      $link.after(iframeHTML);
-      // Ховаємо лінку
-      $link.context.attributes.href.value = null;
-
-      setTimeout(function () {
-        const iframe = document.getElementById(widgetId);
-        const iframeVisible = !!iframe;
-
-        if (!iframeVisible) {
-          console.warn("[TelegramEmbed] iframe missing. Showing fallback for " + channel + "/" + messageId);
-          const fallback = `
-            <div style="margin-top:10px; padding:10px; border:1px solid #ccc; background:#f5f8fa;">
-              <img src="https://telegram.org/img/t_logo.svg" alt="Telegram" style="height:20px; vertical-align:middle; margin-right:10px;" />
-              <a href="https://t.me/${channel}/${messageId}" target="_blank" style="font-weight:bold; color:#0088cc; text-decoration:none;">
-                View Telegram Post</a>
-            </div>`;
-          $link.after(fallback);
-          // Ховаємо лінку
-          $link.context.attributes.href.value = null;
-        } else {
-          console.log("[TelegramEmbed] iframe embed visible for " + channel + "/" + messageId);
-          const height = iframe.clientHeight;
-          console.log("[TelegramEmbed] Detected iframe height:", height);
-
-          if (height < 600) {
-            iframe.style.height = "400px";
-            console.log("[TelegramEmbed] Iframe too short — applying fallback height = 400px");
-          }
-        }
-      }, 2000);
+  // Runs on jQuery ready, before forumotion's FA_Embed collects '.link_embed a' (see CLAUDE.md):
+  // an [embed] link replaced here never reaches FA_Embed.
+  $('div.postbody').each(function () {
+    const block = this;
+    // some [embed] blocks hold the URL as bare text: make it a link first
+    block.querySelectorAll('.link_embed').forEach(function (le) {
+      const t = le.textContent.trim();
+      if (le.querySelector('a') || !parsePost(t)) return;
+      const a = document.createElement('a');
+      a.href = t;
+      a.textContent = t;
+      le.replaceChildren(a);
+    });
+    block.querySelectorAll('a[href*="t.me/"], a[href*="telegram.me/"], a[href*="telegram.dog/"]').forEach(function (a) {
+      if (a.dataset.tgEmbedded) return;
+      a.dataset.tgEmbedded = '1';
+      const p = parsePost(a.getAttribute('href') || '');
+      if (!p) return; // channel, private or invite link: keep as a plain link
+      const slot = document.createElement('div');
+      slot.className = 'tg_embed_slot';
+      slot.style.margin = '10px 0';
+      if (a.closest('.link_embed')) a.replaceWith(slot); // [embed] block: the embed replaces the URL
+      else a.after(slot); // a link inside text: keep it, embed below
+      embed(slot, p);
+      console.log(TAG, 'embedded', p.channel + '/' + p.id);
     });
   });
 });

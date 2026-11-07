@@ -14,8 +14,9 @@ Two halves:
 - **Client scripts** (`client/*.js`) for the itmtank forum (forumotion,
   https://2021-itmtank.forumgamers.net). They are **pasted by the owner** into forumotion's admin
   (JavaScript codes management, "all pages"); nothing here deploys them. Forumotion joins all codes into
-  one file, `/99578.js`. `task live` saves that file to `client/live/99578.min.js`, the reference for
-  what is actually running.
+  one file, `/NNNNN.js` — **the number changes on every edit in admin** (`/99578.js` → `/99729.js`), so read
+  it from a page's `<script src>`. `task live` does that and saves `client/live/forum.min.js`, the
+  reference for what is actually running. A test that intercepts the JS must match `/\d+\.js`, not a name.
 
 ## Which client file is live
 
@@ -23,6 +24,10 @@ Live = FB (`fb.js`), Telegram, Instagram, the censor.net OG preview, and the `{i
 (that one lives in the `bunny-uploader` repo). The repo files drifted from the live code before Rev 1
 (the live FB code had a blocked-video fallback the repo lacked): **before editing a client file, diff it
 against `client/live/99578.min.js`** (prettier it first), and treat the live code as the truth.
+
+Since Rev 1/2 `fb.js`, `tg.js`, `ig.js` share one pattern: on jQuery ready, turn bare-text URLs in
+`.link_embed` into links, then replace each `[embed]` link with a slot (`*_embed_slot`) and fill it; a
+link inside running text is kept and the embed goes below it.
 
 ## Forumotion facts the scripts depend on
 
@@ -38,10 +43,15 @@ against `client/live/99578.min.js`** (prettier it first), and treat the live cod
   `DOMContentLoaded` first). `fb.js` relies on this: it replaces the `<a>` with its own slot, so FA_Embed
   never sees the link, and async work fills a node FA_Embed does not touch. Inserting after a link and
   filling later would land on a detached node once FA_Embed swaps the `<a>`.
+- FA_Embed also embeds Instagram `/p/` (its own `instagram-media` blockquote). `ig.js` replaces the link
+  first, so that does not happen; before Rev 2 a `/p/` post was embedded three times.
 - `fb.js` `FA_HANDLES` lists the forms forumotion embeds; those links are skipped. Re-probe
   `embed_link.php` if forumotion changes (curl it with `?url=`).
 
 ## Footguns
+
+- Telegram embeds size themselves through `postMessage` (`{"event":"resize","height":N}` from
+  `t.me`, matched by `e.source` to the iframe). Do not set a fixed height again: posts get cut.
 
 - `/resolve` for a dead or private FB share link returns the share URL itself (sometimes with
   `?_fb_noscript=1`). The server only counts a result as resolved if it is no longer a `/share/` path
